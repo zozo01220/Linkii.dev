@@ -31,7 +31,7 @@ public record AiProgress(AiStep Step, string Read, string Say, IReadOnlyList<str
 /// de liste attend le bouton « Publier » (les calendriers, eux, s'appliquent tout de suite comme sur leur page).
 /// </summary>
 public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCompose compose, AiReview review, NoticeService notices, DeviceCommandService commands,
-    ScreenControl control, Notifier notifier, AppService apps, MediaLibrary library, HistoryLog history, WebImages webImages, ILogger<AiAssistant> log)
+    ScreenControl control, Notifier notifier, AppService apps, MediaLibrary library, HistoryLog history, WebImages webImages, AssistantPanel panel, ILogger<AiAssistant> log)
 {
     private const int MaxActions = 25, MaxChars = 600;
     private static readonly string[] Commands = { "restart-player", "screen-off", "wake", "reboot" };
@@ -55,15 +55,18 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         - list_add {list,content:"C1" ou "M1",seconds} · list_remove {list,item} · list_move {list,item,to} · list_duration {list,item (ou "all"),seconds} · list_transition {list,item (ou "all"),transition:cut|fade|push-left|push-right|push-up|push-down|zoom} · list_toggle {list,item,on:true|false}
         IMAGES ET COMPOSITIONS
         - media_rename {media,name} · media_describe {media,description,tags:[...]} · media_analyze {media} (l'IA décrit l'image)
-        - composition_create {sentence,portrait:false,list:"L1" ou null,photo:"auto"} (crée une composition depuis une phrase ; « photo » : "M1" pour une image précise de la médiathèque, "auto" pour qu'elle choisisse une image qui convient, sinon une photo neutre d'internet si c'est disponible, "web" pour une photo d'internet, null pour aucune image)
+        - composition_create {sentence,portrait:false,list:"L1" ou null,photo:"auto",ref:"NC1"} (crée une composition depuis une phrase ; « ref » : nouveau repère pour la modifier ou l'ajouter ensuite ; « photo » : "M1" pour une image précise de la médiathèque, "auto" pour qu'elle choisisse une image qui convient, sinon une photo neutre d'internet si c'est disponible, "web" pour une photo d'internet, null pour aucune image)
         - web_image {query,portrait:false} (cherche sur internet une photo d'illustration neutre, sans personne, et l'ajoute à la médiathèque ; « query » : 2 à 4 mots en français ; seulement si « Images d'internet : disponibles »)
         - text_replace {composition,find,replace} (remplace du texte exact dans une composition)
         - text_fix {target:"C1" ou "L1",mode:correct|improve|formal|warm|short} (corrige ou reformule les textes d'une composition, ou de toutes les compositions d'une liste)
+        - composition_edit {composition:"C1",change:"la modification, précise et complète",photo:null} (modifie TOUT ce qu'on veut dans une composition : textes, mise en page, tailles, couleurs, polices, fond, format portrait ou paysage, éléments ajoutés, déplacés ou supprimés, formes, horloge, date, bandeau défilant, compte à rebours, code QR, images ; « photo » : "M1" pour placer cette image de la médiathèque, "auto" pour en chercher une qui convient, "web" pour une photo neutre d'internet, null sinon ; une seule action par composition et par demande : mets-y toutes les modifications)
+        - composition_rename {composition,name} · composition_duplicate {composition,name,ref:"NC1"} (copie à modifier ensuite, l'originale ne change pas)
+        Une composition « (ouverte) » est celle que la personne a sous les yeux : « ici », « cette compo », « la page » parlent d'elle.
         PLANNING ET RÉGLAGES
         - calendar_create {name,list,ref:"NK1"} (« list » : liste jouée hors des événements) · calendar_event {calendar,kind:play|off,list,days:[1..7 lundi=1] (absent : tous les jours),from:"HH:mm",to:"HH:mm",always:false} · calendar_assign {screens,calendar:"K1"}
         - alert_delay {minutes:1|5|10|15|30|60} (délai avant l'alerte « écran hors ligne »)
         « open » : un repère (S1, L1, C1) ou « media », « screens », « playlists », « programmations », « settings », sinon null.
-        ENCHAÎNER : les actions s'exécutent dans l'ordre. Une liste ou un calendrier que tu crées reçoit dans « ref » un nouveau repère (« NL1 », « NL2 »… pour une liste, « NK1 »… pour un calendrier) que les actions suivantes utilisent comme les autres. Crée d'abord, utilise ensuite.
+        ENCHAÎNER : les actions s'exécutent dans l'ordre. Une liste, un calendrier ou une composition que tu crées reçoit dans « ref » un nouveau repère (« NL1 », « NL2 »… pour une liste, « NK1 »… pour un calendrier, « NC1 »… pour une composition) que les actions suivantes utilisent comme les autres. Crée d'abord, utilise ensuite.
         Fais tout l'enchaînement qu'une demande implique dans la même réponse, sans t'arrêter à la première étape. Un « planning » ou une « programmation » est un calendrier.
         Exemple « programme la compo C2 de 9 h à 11 h sur l'écran S1 » :
           1. la liste : une liste existante qui contient C2 (ou une liste vide du même nom : list_add dedans), sinon list_create {name,ref:"NL1"} puis list_add {list:"NL1",content:"C2"} ;
@@ -127,11 +130,18 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
             var wanted = new HashSet<Guid>();
             foreach (var l in d.Playlists.Where(p => norm.Contains(AiMedia.Norm(p.Name)) && p.Name.Length > 2).Take(3))
                 foreach (var it in l.Draft) if (mediaById.TryGetValue(it.MediaId, out var mm) && mm.AppId == Compositions.AppId) wanted.Add(mm.Id);
-            foreach (var c in d.Media.Where(m => m.AppId == Compositions.AppId).OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase).Take(40))
+            // la composition ouverte (son adresse est dans la conversation : « /compositions/… ») et celles qui sont nommées passent en premier, avec leurs textes
+            bool Open(MediaItem m) => request.Contains(m.Id.ToString(), StringComparison.OrdinalIgnoreCase);
+            bool Named(MediaItem m) => wanted.Contains(m.Id) || m.Name.Length > 2 && norm.Contains(AiMedia.Norm(m.Name));
+            foreach (var c in d.Media.Where(m => m.AppId == Compositions.AppId).OrderByDescending(Open).ThenByDescending(Named).ThenBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase).Take(40).OrderBy(m => Open(m) ? 0 : 1).ThenBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase))
             {
                 var key = "C" + ++k; comps[key] = c.Id; names[c.Id] = c.Name;
-                var texts = wanted.Contains(c.Id) || c.Name.Length > 2 && norm.Contains(AiMedia.Norm(c.Name)) ? " · textes : " + string.Join(" | ", TextsOf(c.Settings.GetValueOrDefault("doc")).Take(10).Select(x => "« " + Cut(x, 90) + " »")) : "";
-                sb.Append($"{key} · {c.Name}{texts}\n");
+                var doc = c.Settings.GetValueOrDefault("doc");
+                var open = Open(c);
+                var texts = open || Named(c) ? " · textes : " + string.Join(" | ", TextsOf(doc).Take(10).Select(x => "« " + Cut(x, 90) + " »")) : "";
+                var size = Compositions.Size(c.Settings) is { } sz ? (sz.H > sz.W ? " · portrait" : " · paysage") : "";
+                var right = CompositionRights.RightOf(d, c) < FolderRight.Write ? " · lecture seule (à dupliquer pour la modifier)" : "";
+                sb.Append($"{key} · {c.Name}{(open ? " (ouverte)" : "")}{size} · {Compositions.ElementCount(c.Settings)} élément(s){right}{texts}\n");
             }
             if (k == 0) sb.Append("(aucune composition)\n");
 
@@ -338,7 +348,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
             bool Free(string k) => !c.Screens.ContainsKey(k) && !c.Lists.ContainsKey(k) && !c.Comps.ContainsKey(k) && !c.Media.ContainsKey(k) && !c.Cals.ContainsKey(k);
             void Take(string k) { map[k] = g; if (map == c.Lists) c.Items[k] = new(); }
             if (Str(x, "ref") is { Length: > 0 and <= 12 } r && Free(r)) Take(r);
-            var prefix = map == c.Lists ? "L" : "K";
+            var prefix = map == c.Lists ? "L" : map == c.Comps ? "C" : "K";
             var n = 1;
             while (!Free(prefix + n)) n++;
             Take(prefix + n);
@@ -503,7 +513,30 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 var photo = Ref("photo", c.Media) is { } pm ? pm.ToString() : raw == "web" ? (c.Web ? "web" : "") : raw == "auto" || raw.StartsWith('M') ? "auto" : "";
                 var extra = Guid.TryParse(photo, out var pg) ? $" avec l'image « {N(pg)} »" : photo == "web" ? " avec une photo d'internet" : photo == "auto" ? " (avec une image si l'une convient)" : "";
                 yield return Act($"Créer une composition « {Cut(sentence, 60)} »{(portrait ? " (portrait)" : "")}{extra}{(l != null ? $" et l'ajouter à « {N(l.Value)} »" : "")}",
-                    ("sentence", sentence), ("portrait", portrait.ToString()), ("l", l?.ToString() ?? ""), ("photo", photo));
+                    ("sentence", sentence), ("portrait", portrait.ToString()), ("l", l?.ToString() ?? ""), ("photo", photo), ("id", New(c.Comps, Cut(sentence, 40)).ToString()));
+                break;
+            }
+            case "composition_edit":
+            {
+                var change = Cut(Str(x, "change") ?? Str(x, "instruction"), AiCompose.MaxChange);
+                if (Ref("composition", c.Comps) is not { } comp || change.Length < 3) yield break;
+                var raw = Str(x, "photo")?.Trim() ?? "";
+                var photo = Ref("photo", c.Media) is { } pm ? pm.ToString() : raw == "web" ? (c.Web ? "web" : "") : raw == "auto" ? "auto" : "";
+                var extra = Guid.TryParse(photo, out var pg) ? $" (avec l'image « {N(pg)} »)" : photo == "web" ? " (avec une photo d'internet)" : "";
+                yield return Act($"Modifier « {N(comp)} » : {Cut(change, 140)}{extra}", ("c", comp.ToString()), ("change", change), ("photo", photo));
+                break;
+            }
+            case "composition_rename":
+            {
+                var name = Cut(Str(x, "name"), 80);
+                if (Ref("composition", c.Comps) is { } comp && name.Length > 0) yield return Act($"Renommer la composition « {N(comp)} » en « {name} »", ("c", comp.ToString()), ("name", name));
+                break;
+            }
+            case "composition_duplicate":
+            {
+                if (Ref("composition", c.Comps) is not { } comp) yield break;
+                var name = Cut(Str(x, "name"), 80) is { Length: > 0 } nm ? nm : Cut(N(comp) + " (copie)", 80);
+                yield return Act($"Dupliquer la composition « {N(comp)} » sous le nom « {name} »", ("c", comp.ToString()), ("name", name), ("id", New(c.Comps, name).ToString()));
                 break;
             }
             case "web_image":
@@ -695,6 +728,9 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 }
                 case "text_replace": return TextReplace(a);
                 case "text_fix": return await TextFix(a, ct);
+                case "composition_edit": return await ComposeEdit(a, ct);
+                case "composition_rename": return ComposeRename(a);
+                case "composition_duplicate": return ComposeDuplicate(a);
                 case "calendar_create":
                 {
                     if (!Can(LevelPages.Screens)) return new(NoRight);
@@ -850,7 +886,8 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         if (!r.Ok) return new(r.Message);
         var slide = r.Slides[0];
         if (Compositions.Clean(slide.Doc) is not { } c) return new("La composition n'a pas pu être préparée.");
-        var (item, errors) = apps.SaveInstance(Compositions.AppId, null, slide.Name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
+        var (item, errors) = apps.SaveInstance(Compositions.AppId, null, slide.Name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) },
+            Guid.TryParse(a.A.GetValueOrDefault("id"), out var pre) ? pre : null);   // identifiant tiré d'avance : « NC1 » pour les actions suivantes
         if (item == null) return new(string.Join(" ", errors));
         var info = r.Photo != null ? $"Composition créée avec une image ({r.Photo})." : "Composition créée.";
         if (Guid.TryParse(a.A["l"], out var lid))
@@ -873,7 +910,56 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         if (Compositions.Clean(doc) is not { } c) { err = "La composition est trop grande ou illisible."; return null; }
         var (item, errors) = apps.SaveInstance(Compositions.AppId, id, name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
         if (item == null) { err = string.Join(" ", errors); return null; }
+        panel.CompositionSaved(id);   // l'éditeur ouvert sur cette composition se met à jour
         return c.Doc;
+    }
+
+    /// <summary>
+    /// Modifie une composition selon la demande (tout ce que l'éditeur sait faire sur des éléments simples), avec les droits de la personne :
+    /// une composition partagée en « Peut utiliser » est refusée par <see cref="AppService.SaveInstance"/>. « Annuler » remet l'ancien document et l'ancien nom.
+    /// </summary>
+    private async Task<AiRun> ComposeEdit(AiAction a, CancellationToken ct)
+    {
+        var id = G(a, "c");
+        if (apps.Instance(id) is not { AppId: Compositions.AppId } m) return new("Composition introuvable.");
+        if (store.Read(d => CompositionRights.RightOf(d, m)) < FolderRight.Write) return new("Cette composition vous est partagée en « Peut utiliser » : dupliquez-la pour la modifier.");
+        var old = m.Settings.GetValueOrDefault("doc") ?? "";
+        var mode = a.A.GetValueOrDefault("photo") ?? "";
+        ComposePhotos? photos = null;
+        if (mode.Length > 0)
+        {
+            photos = AiCompose.PhotosFor(store, webImages, a.A["change"], Guid.TryParse(mode, out var chosen) ? chosen : null, mode is "auto" or "web");
+            if (mode == "web") photos = photos with { Library = Array.Empty<(Guid, string)>(), Wanted = true };
+        }
+        var names = store.Read(d => d.AllMedia.Where(x => x.Type is "image" or "video").ToDictionary(x => x.Id, x => x.Name));
+        var r = await compose.Edit(store.ClientId, old, m.Name, a.A["change"], g => names.GetValueOrDefault(g), ct, photos);
+        if (!r.Ok) return new(r.Message);
+        SaveDoc(id, r.Name, r.Doc, out var err);
+        if (err != null) return new(err);
+        var info = (r.Summary.Length > 0 ? r.Summary : "Composition modifiée.") + (r.Photo != null ? $" Image : {r.Photo}." : "") + (r.Name != m.Name ? $" Nouveau nom : « {r.Name} »." : "");
+        return new(null, info, () => { SaveDoc(id, m.Name, old, out var e2); return Task.FromResult(e2); });
+    }
+
+    private AiRun ComposeRename(AiAction a)
+    {
+        var id = G(a, "c");
+        if (apps.Instance(id) is not { AppId: Compositions.AppId } m) return new("Composition introuvable.");
+        var oldName = m.Name; var doc = m.Settings.GetValueOrDefault("doc") ?? "";
+        SaveDoc(id, a.A["name"], doc, out var err);
+        if (err != null) return new(err);
+        return new(null, "Composition renommée.", () => { SaveDoc(id, oldName, doc, out var e2); return Task.FromResult(e2); });
+    }
+
+    /// <summary>Copie d'une composition (même document), rangée comme une nouvelle ; possible aussi pour une composition en lecture seule.</summary>
+    private AiRun ComposeDuplicate(AiAction a)
+    {
+        var src = G(a, "c");
+        if (apps.Instance(src) is not { AppId: Compositions.AppId } m) return new("Composition introuvable.");
+        if (Compositions.Clean(m.Settings.GetValueOrDefault("doc")) is not { } c) return new("Composition illisible.");
+        var (item, errors) = apps.SaveInstance(Compositions.AppId, null, a.A["name"], new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) },
+            Guid.TryParse(a.A.GetValueOrDefault("id"), out var pre) ? pre : null);
+        if (item == null) return new(string.Join(" ", errors));
+        return new(null, $"Copie « {item.Name} » créée.");
     }
 
     private AiRun TextReplace(AiAction a)

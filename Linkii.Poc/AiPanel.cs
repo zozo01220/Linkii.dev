@@ -181,6 +181,10 @@ public sealed class AssistantPanel(JsonStore root, TenantContext ctx)
     public void Restore(bool open) { if (IsOpen == open) return; IsOpen = open; Changed?.Invoke(); }
     public void Refresh() => Changed?.Invoke();
 
+    /// <summary>L'assistant a enregistré cette composition : l'éditeur ouvert dessus recharge le document (ses modifications d'avant restent dans Ctrl+Z).</summary>
+    public event Action<Guid>? CompositionChanged;
+    public void CompositionSaved(Guid id) => CompositionChanged?.Invoke(id);
+
     /// <summary>Pose (ou met à jour) la carte d'une page et ouvre le panneau.</summary>
     public void Show(string key, string ask, string? from, RenderFragment card, Func<string> summary)
     {

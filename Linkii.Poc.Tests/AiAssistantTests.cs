@@ -155,4 +155,38 @@ public class AiAssistantTests
         Assert.Single(acts);
         Assert.Equal("list_create", acts[0].Op);
     }
+
+    [Fact]
+    public void Compositions_modifier_renommer_dupliquer()
+    {
+        var acts = Build("""
+            [{"op":"composition_edit","composition":"C1","change":"Fond bleu nuit, titre en blanc, ajoute l'horloge en bas à droite"},
+             {"op":"composition_edit","composition":"C1","change":"Mets la photo du lac à droite","photo":"M1"},
+             {"op":"composition_rename","composition":"C1","name":"Accueil"},
+             {"op":"composition_duplicate","composition":"C1","name":"Accueil (portrait)","ref":"NC1"},
+             {"op":"composition_edit","composition":"NC1","change":"Passe en portrait"},
+             {"op":"composition_edit","composition":"C9","change":"inconnue"},
+             {"op":"composition_edit","composition":"C1","change":""}]
+            """);
+        Assert.Equal(5, acts.Count);   // repère inconnu et demande vide écartés
+        Assert.Equal(comp.ToString(), acts[0].A["c"]);
+        Assert.Equal("", acts[0].A["photo"]);
+        Assert.StartsWith("Modifier « Chiffres clés » : Fond bleu nuit", acts[0].Label);
+        Assert.Equal(photo.ToString(), acts[1].A["photo"]);
+        Assert.Equal("Accueil", acts[2].A["name"]);
+        Assert.Equal(acts[3].A["id"], acts[4].A["c"]);   // la copie, visée par son repère NC1
+    }
+
+    [Fact]
+    public void Composition_creee_visee_ensuite_par_son_repere()
+    {
+        var acts = Build("""
+            [{"op":"composition_create","sentence":"Fermeture du 24 décembre à 14 h","ref":"NC1","photo":null},
+             {"op":"composition_edit","composition":"NC1","change":"Titre en orange"},
+             {"op":"list_add","list":"L1","content":"NC1"}]
+            """);
+        Assert.Equal(3, acts.Count);
+        Assert.Equal(acts[0].A["id"], acts[1].A["c"]);
+        Assert.Equal(acts[0].A["id"], acts[2].A["content"]);
+    }
 }

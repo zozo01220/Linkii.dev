@@ -11,6 +11,12 @@ namespace Linkii.Poc;
 public record AiSlide(string Name, string Doc);
 
 /// <summary>Résultat : les pages, ou un message d'erreur ; <paramref name="Photo"/> dit d'où vient la photo placée (« Photo de votre médiathèque : … », crédit Pexels), null sans photo.</summary>
+/// <summary>Composition modifiée par l'IA : document propre, nom, crédit de la photo ajoutée, et ce qui a changé (dit par l'IA).</summary>
+public record AiEditResult(bool Ok, string Doc, string Name, string Message, string? Photo = null, string Summary = "")
+{
+    public static AiEditResult Fail(string message) => new(false, "", "", message);
+}
+
 public record AiComposeResult(bool Ok, List<AiSlide> Slides, string Message, string? Photo = null);
 
 /// <summary>
@@ -220,6 +226,146 @@ public class AiCompose(AiService ai, SafeHttp http, MediaImporter importer, ILog
         var site = Meta("og:site_name");
         var desc = Meta("og:description") is { Length: > 0 } d ? d : Meta("description");
         return new SiteInfo(Meta("og:title") is { Length: > 0 } ot ? ot : title, site, desc.Length > 400 ? desc[..400] : desc, Hex.IsMatch(color) ? color : null, image, heads, text.Length > 3500 ? text[..3500] : text);
+    }
+
+    // ---------- Modifier une composition existante (assistant : composition_edit) ----------
+
+    public const int MaxChange = 600;
+
+    private static string EditSystem(int w, int h, bool choose) => $$"""
+        Tu modifies une page existante d'un écran d'affichage dynamique (à lire de loin). Tu reçois la page en JSON puis la modification demandée.
+        Réponds uniquement par un objet JSON, sans commentaire autour :
+        {"name":"nom de la page (garde l'ancien sauf si on demande de le changer)","w":{{w}},"h":{{h}},"bg":"#RRGGBB",{{(choose ? "\"photo\":null,\"photo_query\":null," : "")}}"els":[ ... ],"summary":"ce que tu as changé, en une phrase"}
+        « els » est la liste COMPLÈTE des éléments après la modification, dans l'ordre de dessin (le premier est au fond) :
+        - un élément existant garde son « id » ; ne renvoie que les champs qui changent (au moins « id ») ; un élément absent de la liste est supprimé ;
+        - un nouvel élément n'a pas d'« id » et donne tous ses champs.
+        Types que tu peux créer :
+        - texte : {"type":"text","x":0,"y":0,"w":0,"h":0,"text":"...","font":"Montserrat","size":64,"weight":600,"color":"#RRGGBB","align":"left","italic":false,"lh":1.15,"ls":0,"opacity":1}
+          polices permises : IBM Plex Sans, Montserrat, Poppins, Playfair Display, Oswald, Arial ; « weight » de 300 à 900 ; « align » : left, center ou right ; \n pour passer à la ligne.
+        - forme : {"type":"shape","kind":"rect","x":0,"y":0,"w":0,"h":0,"fill":"#RRGGBB","stroke":"","sw":6,"radius":0,"rot":0,"opacity":1} (kind : rect, circle, line ou arrow)
+        - image : {"type":"image","media":"I1","x":0,"y":0,"w":0,"h":0,"fit":"cover","radius":0,"opacity":1} (« media » : un repère I d'une image déjà dans la page ou proposée plus bas ; « fit » : cover ou contain){{(choose ? " ; ou {\"type\":\"image\",\"slot\":\"photo\",…} pour la photo choisie plus bas" : "")}}
+        - icône : {"type":"icon","icon":"star","x":0,"y":0,"w":200,"h":200,"color":"#RRGGBB","opacity":1} (garde les icônes existantes ; n'en crée que si la page en a déjà une dont tu reprends « icon »)
+        - code QR : {"type":"qr","url":"https://…","x":0,"y":0,"w":220,"h":220,"fg":"#000000","bg":"#FFFFFF"}
+        - widget : {"type":"widget","kind":"clock|date|ticker|countdown","x":0,"y":0,"w":420,"h":90,"font":"IBM Plex Sans","size":56,"weight":500,"color":"#RRGGBB","align":"left"} (ticker : « text », « bg », « speed » en secondes ; countdown : « until » AAAA-MM-JJ ; clock : « sec » true/false)
+        Les éléments reliés à des données (app, list, chart, room) se déplacent, se redimensionnent ou se suppriment, mais ne se créent pas ici ; garde leurs autres champs tels quels.
+        La page fait {{w}} × {{h}} pixels (origine en haut à gauche). Pour passer en portrait ou en paysage, renvoie "w" et "h" (1080 × 1920 ou 1920 × 1080) et repositionne TOUS les éléments dans le nouveau format.
+        Règles : fais exactement ce qui est demandé, garde le reste ; tout reste dans la page ; au plus 40 éléments ; textes très contrastés avec le fond ; garde tels quels les champs entre doubles accolades ({{"{{…}}"}}).
+        N'invente rien : pas de date, d'heure, de prix, de téléphone ni d'adresse qui ne soient dans la page ou la demande. Écris en français, sauf si on te demande une autre langue.
+        """;
+
+    /// <summary>
+    /// Modifie une composition selon une demande en langage courant : mise en page, couleurs, polices, textes, éléments ajoutés, déplacés ou supprimés,
+    /// fond, format (portrait/paysage), images (celles de la page, de la médiathèque ou une photo neutre d'internet). Le serveur fusionne la réponse
+    /// avec le document (<see cref="Merge"/>) : les éléments existants gardent les champs que l'IA ne touche pas, rien d'inconnu n'est accepté.
+    /// </summary>
+    public async Task<AiEditResult> Edit(Guid clientId, string docJson, string name, string change, Func<Guid, string?> mediaName, CancellationToken ct = default, ComposePhotos? photos = null)
+    {
+        change = (change ?? "").Trim();
+        if (change.Length < 3) return AiEditResult.Fail("Dites ce qu'il faut changer dans la composition.");
+        if (change.Length > MaxChange) return AiEditResult.Fail("Cette demande est trop longue : une ou deux phrases suffisent.");
+        JsonObject doc;
+        try { doc = JsonNode.Parse(docJson) as JsonObject ?? throw new JsonException(); }
+        catch (JsonException) { return AiEditResult.Fail("Composition illisible."); }
+        if (doc["els"] is not JsonArray) return AiEditResult.Fail("Composition illisible.");
+        var w = doc["w"] is JsonValue wv && wv.TryGetValue<double>(out var wd) ? (int)wd : 1920;
+        var h = doc["h"] is JsonValue hv && hv.TryGetValue<double>(out var hd) ? (int)hd : 1080;
+
+        // images de la page et de la médiathèque : des repères courts (I1…) plutôt que des identifiants
+        var refs = new Dictionary<string, Guid>();
+        var shown = (JsonObject)doc.DeepClone();
+        foreach (var e in ((JsonArray)shown["els"]!).OfType<JsonObject>())
+            if (Guid.TryParse(Str(e, "media"), out var mid))
+            {
+                var key = refs.FirstOrDefault(kv => kv.Value == mid).Key ?? "I" + (refs.Count + 1);
+                refs[key] = mid; e["media"] = key;
+            }
+            else if (Str(e, "type") is "image" or "video") e["media"] = null;
+        var sb = new global::System.Text.StringBuilder();
+        sb.Append("Page actuelle (« ").Append(name).Append(" ») :\n").Append(shown.ToJsonString()).Append('\n');
+        if (refs.Count > 0)
+        {
+            sb.Append("\nImages de la page :\n");
+            foreach (var (k, id) in refs) sb.Append(k).Append(" · ").Append(mediaName(id) ?? "image").Append('\n');
+        }
+        var choose = photos is { Any: true };
+        if (choose) sb.Append(PhotoBrief(photos!));
+        sb.Append("\n\nModification demandée : ").Append(change);
+
+        var r = await ai.Complete(clientId, "compose", EditSystem(w, h, choose), new UserMessageParam { Content = sb.ToString() }, 6000, ct);
+        if (!r.Ok) return AiEditResult.Fail(r.Message);
+        var a = r.Text.IndexOf('{'); var b = r.Text.LastIndexOf('}');
+        JsonObject? answer = null;
+        try { if (a >= 0 && b > a) answer = JsonNode.Parse(r.Text[a..(b + 1)]) as JsonObject; }
+        catch (JsonException) { answer = null; }
+        if (answer == null) return AiEditResult.Fail("L'IA n'a pas réussi cette modification. Reformulez, ou faites-la dans l'éditeur.");
+
+        Guid? photo = null; string? note = null;
+        if (choose)
+        {
+            var wrapped = new JsonObject { ["slides"] = new JsonArray(answer.DeepClone()) };
+            (photo, note) = await PickPhoto(wrapped.ToJsonString(), photos!, (Num(answer, "h", 1, 8000, h) > Num(answer, "w", 1, 8000, w)), ct);
+        }
+        var merged = Merge(doc, answer, refs, photo);
+        if (merged == null) return AiEditResult.Fail("L'IA a rendu une page vide ou illisible : rien n'a été changé.");
+        if (Compositions.Clean(merged.ToJsonString()) is not { } clean) return AiEditResult.Fail("La composition modifiée est trop grande ou illisible : rien n'a été changé.");
+        var newName = Str(answer, "name") is { } nn && nn.Trim().Length > 0 ? (nn.Trim().Length > 80 ? nn.Trim()[..80] : nn.Trim()) : name;
+        var summary = Str(answer, "summary") is { } s ? (s.Length > 300 ? s[..300] : s) : "";
+        return new AiEditResult(true, clean.Doc, newName, "", merged.ToJsonString().Contains(photo?.ToString() ?? "\u0000") ? note : null, summary);
+    }
+
+    private static readonly HashSet<string> NewTypes = new() { "text", "shape", "image", "icon", "qr", "widget" };
+
+    /// <summary>
+    /// Fusionne la réponse de l'IA avec le document : un élément existant (même « id ») garde tous ses champs et ne reçoit que ceux que l'IA renvoie
+    /// (sauf « id » et « type ») ; un élément absent est supprimé ; un nouvel élément (types simples seulement) reçoit un identifiant neuf.
+    /// Les images ne viennent que des repères connus (<paramref name="refs"/>) ou de la photo choisie (« slot »:"photo") ; un repère inconnu laisse l'image d'avant.
+    /// Rend null si la page serait vide alors qu'elle ne l'était pas.
+    /// </summary>
+    public static JsonObject? Merge(JsonObject doc, JsonObject answer, IReadOnlyDictionary<string, Guid> refs, Guid? photo)
+    {
+        var old = (doc["els"] as JsonArray ?? new()).OfType<JsonObject>().Where(e => Str(e, "id") != null).ToDictionary(e => Str(e, "id")!, e => e);
+        var w = doc["w"]?.DeepClone() ?? 1920; var h = doc["h"]?.DeepClone() ?? 1080;
+        if (Num(answer, "w", 0, 8000, 0) is var nw and >= Compositions.MinSide && Num(answer, "h", 0, 8000, 0) is var nh and >= Compositions.MinSide) { w = nw; h = nh; }
+        var bg = Str(answer, "bg") is { } c && Hex.IsMatch(c) ? c : Str(doc, "bg") ?? "#FFFFFF";
+        var els = new JsonArray();
+        var used = new HashSet<string>();
+        foreach (var e in (answer["els"] as JsonArray ?? new()).OfType<JsonObject>().Take(Compositions.MaxElements))
+        {
+            JsonObject copy;
+            if (Str(e, "id") is { } id && old.TryGetValue(id, out var prev) && used.Add(id))
+            {
+                copy = (JsonObject)prev.DeepClone();
+                foreach (var (k, v) in e)
+                {
+                    if (k is "id" or "type" or "slot") continue;
+                    if (k == "media") { if (Str(e, "media") is { } mr && refs.TryGetValue(mr, out var mg)) copy["media"] = mg.ToString(); continue; }
+                    copy[k] = v?.DeepClone();
+                }
+                if (Str(e, "slot") == "photo" && photo is { } p && Str(copy, "type") is "image") copy["media"] = p.ToString();
+            }
+            else
+            {
+                var type = Str(e, "type") ?? "";
+                if (!NewTypes.Contains(type)) continue;
+                copy = new JsonObject();
+                foreach (var (k, v) in e) if (k is not ("id" or "slot" or "media")) copy[k] = v?.DeepClone();
+                copy["id"] = NewId();
+                if (type == "image")
+                {
+                    Guid? m = Str(e, "slot") == "photo" ? photo : Str(e, "media") is { } mr && refs.TryGetValue(mr, out var mg) ? mg : null;
+                    if (m == null) continue;
+                    copy["media"] = m.ToString();
+                    if (copy["fit"] == null) copy["fit"] = "cover";
+                }
+                if (type == "text" && (Str(copy, "text") ?? "").Length == 0) continue;
+                if (type == "text" && !Fonts.Contains(Str(copy, "font") ?? "")) copy["font"] = "Montserrat";
+                foreach (var (k, dflt) in new (string, int)[] { ("x", 0), ("y", 0), ("w", 300), ("h", 100) }) copy[k] = Num(copy, k, -8000, 8000, dflt);
+                if (copy["opacity"] == null) copy["opacity"] = 1;
+            }
+            els.Add(copy);
+        }
+        if (els.Count == 0 && old.Count > 0) return null;
+        return new JsonObject { ["v"] = 1, ["w"] = w, ["h"] = h, ["bg"] = bg, ["els"] = els };
     }
 
     // ---------- Contrôle de ce que l'IA a dessiné ----------

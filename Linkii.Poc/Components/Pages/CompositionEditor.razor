@@ -86,6 +86,7 @@ else
     {
         if (!firstRender || !ready || !Svc.IsInstalled(Compositions.AppId)) return;
         self = DotNetObjectReference.Create(this);
+        Panel.CompositionChanged += OnAssistantSaved;
         await JS.InvokeVoidAsync("LinkiiCompoEditor.mount", root, new
         {
             name = item?.Name ?? startTemplate?.Name ?? "",
@@ -409,8 +410,22 @@ else
         }
     };
 
+    /// <summary>L'assistant a modifié cette composition : l'éditeur reprend le document enregistré (Ctrl+Z ramène l'état d'avant).</summary>
+    private void OnAssistantSaved(Guid id)
+    {
+        if (id != (Id ?? createdId)) return;
+        _ = InvokeAsync(async () =>
+        {
+            var m = Svc.Instance(id);
+            if (m == null) return;
+            try { await JS.InvokeVoidAsync("LinkiiCompoEditor.replaced", m.Settings.GetValueOrDefault("doc") ?? "", m.Name, Images()); }
+            catch (JSException) { } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }
+        });
+    }
+
     public async ValueTask DisposeAsync()
     {
+        Panel.CompositionChanged -= OnAssistantSaved;
         Panel.Release(aiKey);
         try { await JS.InvokeVoidAsync("LinkiiCompoEditor.unmount"); }
         catch (JSDisconnectedException) { }

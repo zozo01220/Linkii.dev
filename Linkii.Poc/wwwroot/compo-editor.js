@@ -3080,5 +3080,22 @@
     if (msg.trim()) toast(msg.trim(), !(ids && ids.length));
   }
 
-  w.LinkiiCompoEditor = { mount, unmount, gallery, importing, imported, applyAi };
+  /** L'assistant a enregistré une nouvelle version de cette composition : elle remplace celle de l'éditeur, l'état d'avant reste dans Ctrl+Z. */
+  function replaced(json, newName, imgs) {
+    if (!root || !D) return false;
+    let doc; try { doc = JSON.parse(json); } catch (x) { return false; }
+    if (!doc || !Array.isArray(doc.els)) return false;
+    if (Array.isArray(imgs)) images = imgs;
+    D = doc;
+    if (typeof newName === 'string' && newName) { name = savedName = newName; const n = q('#ce-name'); if (n) n.value = name; }
+    multi = multi.filter(id => byId(id)); if (multi.length < 2) multi = []; if (!multi.length && !cur()) selId = null;
+    render(); renderCtx();
+    push(); savedDoc = JSON.stringify(D);   // après le rendu, qui complète le document : c'est la version enregistrée
+    setDirty();
+    q('#ce-undo').disabled = hi <= 0; q('#ce-redo').disabled = true;
+    toast("Composition modifiée par l'assistant. Ctrl+Z pour revenir en arrière.");
+    return true;
+  }
+
+  w.LinkiiCompoEditor = { mount, unmount, gallery, importing, imported, applyAi, replaced };
 })(window);

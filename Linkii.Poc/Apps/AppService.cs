@@ -321,7 +321,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     /// Crée ou met à jour une instance après validation. <paramref name="values"/> contient une entrée par champ : un secret laissé vide est conservé.
     /// Les playlists qui contiennent l'instance passent en « brouillon non publié ».
     /// </summary>
-    public (MediaItem? Item, List<string> Errors) SaveInstance(string appId, Guid? instanceId, string name, IReadOnlyDictionary<string, string> values)
+    public (MediaItem? Item, List<string> Errors) SaveInstance(string appId, Guid? instanceId, string name, IReadOnlyDictionary<string, string> values, Guid? newId = null)
     {
         var m = catalog.Find(appId) ?? throw new InvalidOperationException("App inconnue.");
         if (m.Plan == Plans.Growth && !store.Read(d => d.Tenant.IsGrowth)) throw new InvalidOperationException($"« {m.Name} » fait partie du plan Pro.");
@@ -334,7 +334,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         {
             if (!d.Access.CanUse(m)) return (null, new List<string> { "Vous êtes en lecture seule : vous ne pouvez pas utiliser cette application." });
             if (instanceId == null && !d.AppInstalls.Any(a => a.AppId == appId)) return (null, new List<string> { "Activez d'abord cette application dans la page Applications." });   // une app désactivée garde ses contenus modifiables
-            var item = instanceId is { } id ? d.Media.FirstOrDefault(x => x.Id == id && x.AppId == appId) : new MediaItem { Type = "app", AppId = appId };
+            var item = instanceId is { } id ? d.Media.FirstOrDefault(x => x.Id == id && x.AppId == appId) : new MediaItem { Id = newId ?? Guid.NewGuid(), Type = "app", AppId = appId };   // newId : identifiant tiré d'avance par l'assistant (repère NC1)
             if (item == null) return (null, new List<string> { "Instance introuvable." });
             if (instanceId != null && CompositionRights.RightOf(d, item) < FolderRight.Write) return (null, new List<string> { "Cette composition vous est partagée en « Peut utiliser » : dupliquez-la pour la modifier." });
 
