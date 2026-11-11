@@ -1,0 +1,702 @@
+@* Premiers pas avec l'assistant (DEV-POC §232, maquette maquettes/premiers-pas-assistant-ia.html, validée le 11 nov. 2026) :
+   à gauche la discussion (six étapes suivies en direct, puis les retouches), à droite l'écran qui se construit puis tourne (le vrai player en aperçu)
+   et le fil de la liste ; ensuite « C'est prêt » : aperçu sur le téléphone par QR (24 h), connecter un écran. Hébergé par WelcomeWizard. *@
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
+@using System.Net
+@inject TenantStore Store
+@inject AiStarter Starter
+@inject PreviewGrants Grants
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject MediaImporter Importer
+@inject ILogger<AiStartView> Log
+
+@if (view == "ready")
+{
+    var url = ShareUrl;
+    var qr = QrCodes.Build(url);
+    <section class="pa-s4">
+        <div class="pa-s4m" @ref="readyRoot">
+            <div class="pa-s4l">
+                <span class="pa-okk"><Ico Name="check" Size="15" /> Liste « @ListName » créée</span>
+                <h2>Votre écran est prêt.<br />Il ne reste qu'à l'allumer.</h2>
+                <div class="pa-slot4"><div class="pa-tvw @(st.Portrait ? "portrait" : "")"><div class="pa-tv"><div class="pa-scr"><div class="pa-player" @ref="readyHost"></div></div></div><div class="pa-stand"></div></div></div>
+                <div class="pa-made">
+                    <span><Ico Name="image" Size="14" /><b>@st.Brief.Photos.Count</b> photo@(st.Brief.Photos.Count > 1 ? "s" : "")</span>
+                    <span><Ico Name="grid" Size="14" /><b>@ComposCount</b> composition@(ComposCount > 1 ? "s" : "")</span>
+                    @if (st.Weather != null) { <span><Ico Name="sun" Size="14" /><b>1</b> météo</span> }
+                    <span><Ico Name="clock" Size="14" /><b>@Helpers.FormatDuration(st.Order().Count * AiStarter.PageSeconds)</b> en boucle</span>
+                </div>
+            </div>
+            <div class="pa-s4r">
+                <div class="pa-opt main">
+                    <span class="new">Nouveau</span>
+                    <div class="pa-qr" aria-label="Code QR de l'aperçu sur téléphone">
+                        @if (qr is { } q) { <svg viewBox="0 0 @q.Size @q.Size" shape-rendering="crispEdges"><rect width="@q.Size" height="@q.Size" fill="#fff" /><path d="@q.Path" fill="#0B1F3A" /></svg> }
+                    </div>
+                    <h3>Sur votre téléphone, tout de suite</h3>
+                    <p>Scannez avec l'appareil photo : votre liste tourne sur votre téléphone, comme sur un vrai écran.</p>
+                    <small>Aperçu valable 24 h · rien à installer@(Local ? " · sur ce poste de test, le téléphone ne joindra pas « localhost »" : "")</small>
+                </div>
+                <div class="pa-opt">
+                    <span class="ci"><Ico Name="monitor" Size="20" /></span>
+                    <h3>@(HasScreen ? "Sur votre écran" : "Sur un écran")</h3>
+                    <p>@(HasScreen ? $"Choisissez « {ListName} » sur la carte de l'écran, puis publiez." : "Allumez l'écran, il affiche un code : saisissez-le et votre liste démarre aussitôt.")</p>
+                    <div class="pa-opt-act">
+                        @if (!HasScreen) { <div class="devs"><span><PlayerLogo Kind="Navigateur" Size="16" /> Navigateur</span><span><PlayerLogo Kind="Android" Size="16" /> Android</span><span><PlayerLogo Kind="Windows" Size="16" /> Windows</span><span><PlayerLogo Kind="Linux" Size="16" /> Linux</span></div> }
+                        <button type="button" class="pa-pri" @onclick="ConnectScreen">@(HasScreen ? "Aller à mes écrans" : "Connecter un écran") <Ico Name="arrow-right" Size="16" /></button>
+                    </div>
+                </div>
+                <div class="pa-opt sm">
+                    <span class="ci"><Ico Name="external" Size="18" /></span>
+                    <a href="@url" target="_blank" rel="noopener">Ouvrir le player sur cet ordinateur <Ico Name="arrow-right" Size="15" /></a>
+                </div>
+            </div>
+        </div>
+        <footer class="pa-foot">
+            <button type="button" class="btn ghost" @onclick="BackToList"><Ico Name="chevron-left" Size="16" /> Revenir à la liste</button>
+            <span class="grow"></span>
+            <span class="pa-foot-n">Tout est rangé dans Médiathèque, Compositions et Listes de diffusion.</span>
+            <button type="button" class="btn" @onclick="() => Finish.InvokeAsync()">Terminer</button>
+        </footer>
+    </section>
+}
+else
+{
+    <section class="pa-build">
+        <div class="pa-bmain">
+            <div class="pa-chat">
+                <div class="pa-thread" @ref="threadEl">
+                    <div class="pa-u">@Ask</div>
+                    <div class="pa-a">
+                        <div class="pa-aw">@Av Assistant</div>
+                        <div class="pa-run">
+                            <div class="pa-runh" data-st="@RunState">
+                                @if (running) { <span class="spin"></span> } else if (built) { <span class="okk"><Ico Name="check" Size="14" /></span> }
+                                <span>Je prépare votre écran</span><span class="n">@RunNote</span><span class="grow"></span>
+                                @if (running) { <button type="button" class="stop" @onclick="Stop"><Ico Name="pause" Size="11" /> Arrêter</button> }
+                                <span class="bar" style="width:@BarPct%"></span>
+                            </div>
+                            @foreach (var s in steps.Where(s => s.State != "wait"))
+                            {
+                                var step = s;
+                                <div class="pa-li @step.State" @key="step.N">
+                                    <span class="st">@if (step.State == "ok") { <Ico Name="check" Size="11" /> } else if (step.State == "skip") { <Ico Name="minus" Size="11" /> } else if (step.State == "err") { <Ico Name="x" Size="11" /> }</span>
+                                    <div><b>@Label(step.N)</b>@Detail(step)</div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    @if (failure != null)
+                    {
+                        <div class="pa-a">
+                            <div class="pa-aw">@Av Assistant</div>
+                            <p>@failure</p>
+                            <div class="pa-sugg">
+                                <button type="button" @onclick="Retry"><Ico Name="refresh" Size="14" /> Réessayer</button>
+                                <button type="button" @onclick="() => Back.InvokeAsync()"><Ico Name="chevron-left" Size="14" /> Changer ma demande</button>
+                            </div>
+                        </div>
+                    }
+                    @if (built)
+                    {
+                        <div class="pa-a">
+                            <div class="pa-aw">@Av Assistant</div>
+                            <p><b>Votre liste « @ListName » est prête.</b> @(st.Brief.Logo != null ? "Elle tourne déjà dans l'aperçu, avec votre logo, vos couleurs et vos photos." : "Elle tourne déjà dans l'aperçu. Envoyez-moi votre logo et je l'ajoute partout.")</p>
+                            @if (HasBrackets) { <p>Complétez ce qui est entre crochets (par exemple vos horaires) : dites-le-moi ici, ou retouchez la page ensuite.</p> }
+                            <p>Rien n'est encore diffusé. Envie de changer quelque chose ? Dites-le simplement.</p>
+                            <div class="pa-sugg">
+                                <button type="button" disabled="@busy" @onclick='() => Adjust("warm")'><Ico Name="spark" Size="14" /> Plus chaleureux</button>
+                                <button type="button" disabled="@busy" @onclick='() => Adjust("short")'><Ico Name="minus" Size="14" /> Plus court</button>
+                                <button type="button" disabled="@busy" @onclick='() => Adjust("en")'><Ico Name="globe" Size="14" /> @(st.Bilingual ? "Sans l'anglais" : "Aussi en anglais")</button>
+                                <button type="button" disabled="@busy" @onclick='() => Adjust("portrait")'><Ico Name="phone" Size="14" /> @(st.Portrait ? "Revenir au paysage" : "Version portrait")</button>
+                                @if (st.Brief.Logo == null) { <label class="pa-sugg-l @(busy ? "off" : "")" for="pa-logo"><Ico Name="image" Size="14" /> Ajouter mon logo</label> }
+                            </div>
+                        </div>
+                    }
+                    @foreach (var m in msgs)
+                    {
+                        var msg = m;
+                        if (msg.Mine) { <div class="pa-u">@msg.Text</div> }
+                        else
+                        {
+                            <div class="pa-a">
+                                <div class="pa-aw">@Av Assistant</div>
+                                <div class="pa-say @(msg.Failed ? "bad" : "")">@msg.Html</div>
+                                @if (msg.Receipt != null)
+                                {
+                                    <div class="pa-rc @(msg.Undone ? "undone" : "")"><Ico Name="check" Size="14" /><span>@(msg.Undone ? "Annulé" : msg.Receipt)</span>
+                                        @if (!msg.Undone && msg.Undo != null) { <button type="button" class="lnk" disabled="@busy" @onclick="() => Undo(msg)">Annuler</button> }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                    @if (busy) { <div class="pa-dots"><i></i><i></i><i></i></div> }
+                </div>
+                <div class="pa-cf">
+                    <form class="pa-comp @(built && !busy ? "" : "off")" @ref="composeForm" @onsubmit="Send" @onsubmit:preventDefault>
+                        <label class="pa-ib" for="pa-logo" title="Ajouter mon logo" aria-label="Ajouter mon logo"><Ico Name="image" Size="17" /></label>
+                        <textarea @ref="composeTa" rows="1" @bind="say" @bind:event="oninput" maxlength="@AiStarter.MaxAsk" disabled="@(!built || busy)" placeholder="@(built ? "Demandez une modification…" : "L'assistant travaille…")" aria-label="Demander une modification"></textarea>
+                        <button type="submit" class="pa-send" aria-label="Envoyer" disabled="@(!built || busy || say.Trim().Length < 2)"><Ico Name="arrow-up" Size="17" /></button>
+                    </form>
+                    <InputFile id="pa-logo" class="pa-hidden" accept="image/*" OnChange="LogoPicked" />
+                    <div class="pa-cfn"><span>Chaque modification s'annule d'un clic.</span><span>@(AiTrial ? "Inclus dans votre essai" : "Assistant Linkivi")</span></div>
+                </div>
+            </div>
+
+            <div class="pa-stage">
+                <div class="pa-sh">
+                    <span class="pa-live @(tvMode == "play" ? "on" : "")"><i></i>@(tvMode == "play" ? "Aperçu en direct" : "Préparation de l'aperçu")</span>
+                    <span class="grow"></span>
+                    <span class="pa-ori @(built && !busy ? "" : "off")" role="group" aria-label="Format de l'écran">
+                        <button type="button" class="@(st.Portrait ? "" : "on")" @onclick='() => { if (st.Portrait) _ = Adjust("portrait"); }'><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2" /></svg> Paysage</button>
+                        <button type="button" class="@(st.Portrait ? "on" : "")" @onclick='() => { if (!st.Portrait) _ = Adjust("portrait"); }'><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2" /></svg> Portrait</button>
+                    </span>
+                </div>
+                <div class="pa-id @(Shown(2) ? "show" : "") @(Shown(3) ? "ph" : "")">
+                    @if (Logo is { } logo) { <span class="idl"><img src="@Thumb(logo, 120)" alt="" /><b>@(st.Brief.Name.Length > 0 ? st.Brief.Name : "Votre logo")</b></span> }
+                    else { <span class="idl"><span class="nologo">Logo</span><b>@(st.Brief.Name.Length > 0 ? st.Brief.Name : "Votre identité")</b></span> }
+                    <span class="sep"></span>
+                    <span class="sw">@Swatches</span><span>Couleurs</span>
+                    <span class="sep"></span>
+                    <span class="aa" style="font-family:'@st.Brief.Font',sans-serif">Aa</span><span>@st.Brief.Font</span>
+                    @if (Shown(3) && Photos.Count > 0)
+                    {
+                        <span class="sep"></span>
+                        <span class="ths">@foreach (var p in Photos.Take(4)) { <i style="background-image:url('@Thumb(p, 120)')"></i> }</span>
+                        <span>@Photos.Count photo@(Photos.Count > 1 ? "s" : "")</span>
+                    }
+                </div>
+
+                <div class="pa-screen">
+                    <div class="pa-tvw @(st.Portrait ? "portrait" : "")">
+                        <div class="pa-tv"><div class="pa-scr">
+                            @if (tvMode == "play")
+                            {
+                                <div class="pa-player" @ref="tvHost"></div>
+                            }
+                            else if (tvMode == "write" && Item(writing) is { } w)
+                            {
+                                <div class="pa-wr" @key="w.Id"><CompositionThumb Item="w" Files="files" Contain="true" /></div>
+                                <div class="pa-writing on"><span class="pa-av">@Spark</span> L'assistant écrit « <b>@w.Name</b> »</div>
+                            }
+                            else if (isSite)
+                            {
+                                <div class="pa-phaseA @(steps[0].State == "go" ? "scan" : "") @(Done(2) ? "f-logo f-col" : "") @(Shown(3) ? "f-ph" : "")">
+                                    <div class="pa-bw">
+                                        <div class="bar"><i></i><i></i><i></i><span class="url"><Ico Name="lock" Size="12" />@(site?.Host ?? Host(Ask))</span></div>
+                                        <div class="site">
+                                            <div class="nav"><span class="slg">@if (Logo is { } lg) { <img src="@Thumb(lg, 160)" alt="" /> } else { <i class="lgph"></i> }<span class="tagx">Logo</span></span><i></i><i></i><i></i><span class="cta" style="background:@st.Brief.Colors.Accent"><span class="tagx">Couleurs</span></span></div>
+                                            <div class="hero" style="@(Photos.Count > 0 ? $"background-image:url('{Thumb(Photos[0], 640)}')" : "")"><span class="tagx">Photos</span><div class="h-t"><b></b><b class="s"></b></div></div>
+                                            <div class="cols"><div><b></b><i></i><i></i></div><div><b></b><i></i><i></i></div><div><b></b><i></i><i></i></div></div>
+                                        </div>
+                                        <div class="beam"></div>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                var known = Done(1);
+                                <div class="pa-phaseA scan @(known ? "f-col" : "") @(Shown(3) ? "f-ph" : "")">
+                                    <div class="pa-brief">
+                                        <div class="bh">@Spark Ce que j'ai compris @if (!known) { <span class="pa-dots sm"><i></i><i></i><i></i></span> }</div>
+                                        @if (known)
+                                        {
+                                            <div class="row"><small>Activité</small><b>@st.Brief.Activity</b></div>
+                                            @if (st.Brief.City != null) { <div class="row"><small>Lieu</small><b>@st.Brief.City</b></div> }
+                                            <div class="row"><small>Objectif</small><b>@st.Brief.Goal</b></div>
+                                            <div class="row"><small>Ton</small><b>@st.Brief.Tone</b></div>
+                                            <div class="row rc"><small>Couleurs</small><span class="sw">@Swatches</span></div>
+                                            <div class="pics">@for (var i = 0; i < 4; i++) { var p = i < Photos.Count ? Photos[i] : (Guid?)null; <i style="@(p is { } pp ? $"--im:url('{Thumb(pp, 320)}')" : "")"></i> }</div>
+                                            <div class="pex">@(samples ? "Images d'exemple Linkivi, à remplacer par les vôtres" : "Photos libres de droits · sans personne reconnaissable")</div>
+                                        }
+                                        else { <div class="row r0"><small>Votre demande</small><b>@Ask</b></div> }
+                                    </div>
+                                </div>
+                            }
+                        </div></div>
+                        <div class="pa-stand"></div>
+                    </div>
+                </div>
+
+                <div class="pa-filmw">
+                    <div class="pa-fh"><Ico Name="layers" Size="16" /><b>Liste « @ListName »</b><span>@Cards.Count contenu@(Cards.Count > 1 ? "s" : "")</span><span>·</span><span class="tot">@(Timed ? Helpers.FormatDuration(Cards.Count * AiStarter.PageSeconds) : "…")</span><span class="grow"></span>@if (built) { <span class="hint">Cliquez une page pour la voir</span> }</div>
+                    <div class="pa-film @(Timed ? "timed" : "") @(st.Portrait ? "portrait" : "")" @ref="filmEl">
+                        @if (Cards.Count == 0) { <div class="pa-film-empty">Vos pages arrivent ici…</div> }
+                        @for (var i = 0; i < Cards.Count; i++)
+                        {
+                            var c = Cards[i];
+                            <div class="pa-card" data-k="@i" @key="c.Id" title="@c.Name">
+                                <div class="th">
+                                    @if (c.AppId == Compositions.AppId) { <CompositionThumb Item="c" Files="files" Contain="true" /> }
+                                    else { <span class="pa-wx"><AppIcon Id="weather-slide" Small="false" Tile="true" /><b>@c.Name</b></span> }
+                                    <span class="pa-dur">@AiStarter.PageSeconds s</span>
+                                    @if (st.Bilingual && st.EnPages.ContainsValue(c.Id)) { <span class="pa-en">EN</span> }
+                                </div>
+                                <div class="nm"><Ico Name="@(c.AppId == Compositions.AppId ? "grid" : "sun")" Size="14" /><span>@c.Name</span></div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+        <footer class="pa-foot">
+            @if (built)
+            {
+                <span class="st"><Ico Name="check" Size="16" /><span><b>Tout est enregistré</b> : @Saved</span></span>
+            }
+            else if (running) { <span class="st"><span class="spin"></span> L'assistant prépare vos contenus et votre liste…</span> }
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" disabled="@(!built || busy)" title="Ouvre l'étape « Votre liste » habituelle" @onclick="() => EditMyself.InvokeAsync(st.ListId!.Value)">Modifier moi-même</button>
+            <button type="button" class="pa-pri" disabled="@(!built || busy)" @onclick="ToReady">Afficher sur un écran <Ico Name="arrow-right" Size="16" /></button>
+        </footer>
+    </section>
+}
+
+@code {
+    /// <summary>L'adresse du site ou la phrase tapée dans l'accueil de l'assistant.</summary>
+    [Parameter, EditorRequired] public string Ask { get; set; } = "";
+    [Parameter] public bool HasScreen { get; set; }
+    /// <summary>Étape de l'en-tête (1 Vos contenus, 2 Votre liste, 3 C'est prêt).</summary>
+    [Parameter] public EventCallback<int> StepChanged { get; set; }
+    /// <summary>Retour à l'accueil de l'assistant pour changer la demande.</summary>
+    [Parameter] public EventCallback Back { get; set; }
+    /// <summary>« Modifier moi-même » : l'étape « Votre liste » habituelle, sur cette liste.</summary>
+    [Parameter] public EventCallback<Guid> EditMyself { get; set; }
+    [Parameter] public EventCallback Finish { get; set; }
+    [Parameter] public EventCallback ConnectScreen { get; set; }
+
+    private const string ListName = AiStarter.ListName;
+    private sealed class Step { public int N; public string State = "wait"; public string? Note; }   // wait | go | ok | skip | err
+    private sealed class Msg { public bool Mine; public string Text = ""; public MarkupString Html; public string? Receipt; public StartState.Snapshot? Undo; public bool Undone, Failed; }
+
+    private readonly List<Step> steps = Enumerable.Range(1, 6).Select(n => new Step { N = n }).ToList();
+    private readonly List<Msg> msgs = new();
+    private StartState st = new();
+    private SiteRead? site;
+    private StartPick pick = StartPick.None;
+    private bool isSite, running, built, busy, samples, disposed, tvDirty, readyDirty, scroll;
+    private string? failure;
+    private string tvMode = "read", view = "build", say = "";
+    private Guid? writing, chatId;
+    private int tvAt;
+    private string? token, share;
+    private List<MediaItem> files = new();
+    private CancellationTokenSource cts = new();
+    private ElementReference threadEl, tvHost, filmEl, composeTa, composeForm, readyHost, readyRoot;
+    private bool composeInit;
+
+    private static readonly RenderFragment Spark = __builder => { <Ico Name="spark" Size="13" /> };
+    private static readonly RenderFragment Av = __builder => { <span class="pa-av"><Ico Name="spark" Size="13" /></span> };
+
+    private bool AiTrial => Store.Read(d => d.Tenant.InTrial(DateTime.UtcNow) && !d.Tenant.Subscribed);
+    private bool Local => Nav.BaseUri.Contains("://localhost") || Nav.BaseUri.Contains("://127.0.0.1");
+    private string ShareUrl => Nav.BaseUri + "player/?preview=" + share;
+    private MediaItem? Item(Guid? id) => id is { } g ? files.FirstOrDefault(f => f.Id == g) : null;
+    private MediaItem? Logo => Item(st.Brief.Logo);
+    private List<Guid> Photos => st.Brief.Photos.Where(p => Item(p) != null).ToList();
+    private List<MediaItem> Cards => st.Order().Select(id => Item(id)).OfType<MediaItem>().ToList();
+    private int ComposCount => st.Pages.Count + (st.Bilingual ? st.EnPages.Count : 0);
+    private bool Timed => built || steps[5].State is "go" or "ok";
+    private bool HasBrackets => System.Text.RegularExpressions.Regex.IsMatch(System.Text.Json.JsonSerializer.Serialize(st.Brief.Pages, StartTemplates.Json), @"\[[^\]\[""]{2,40}\]");
+    private string Saved => $"{st.Brief.Photos.Count} photo{(st.Brief.Photos.Count > 1 ? "s" : "")} dans la médiathèque, {ComposCount} compositions{(st.Weather != null ? ", la météo" : "")} et la liste « {ListName} ».";
+    private bool Done(int n) => steps[n - 1].State is "ok" or "skip";
+    private bool Shown(int n) => steps[n - 1].State != "wait" && (n != 2 || Done(2)) && (n != 3 || Done(3) || steps[2].State == "go" && st.Brief.Photos.Count > 0);
+    private string Thumb(MediaItem m, int w) => m.FileName == null ? "" : $"/media/{m.FileName}?w={w}";
+    private string Thumb(Guid id, int w) => Item(id) is { } m ? Thumb(m, w) : "";
+    private static string Host(string ask) { var a = ask.Trim(); a = a.Contains("://") ? a[(a.IndexOf("://") + 3)..] : a; return a.Split('/')[0].Replace("www.", ""); }
+
+    private RenderFragment Swatches => __builder =>
+    {
+        foreach (var c in new[] { st.Brief.Colors.Deep, st.Brief.Colors.Accent, st.Brief.Colors.Light }) { <i style="background:@c"></i> }
+    };
+
+    private string RunState => built ? "done" : failure != null ? "stop" : running ? "go" : "stop";
+    private string RunNote => built ? "· terminé" : failure != null ? "· arrêté" : steps.LastOrDefault(s => s.State == "go") is { } g ? $"· étape {g.N} sur 6" : "";
+    private int BarPct => built ? 100 : (int)(steps.Count(s => s.State is "ok" or "skip") * 100.0 / 6 + (running ? 6 : 0));
+
+    private string Label(int n) => n switch
+    {
+        1 => isSite ? "Je lis votre site" : "Je comprends votre besoin",
+        2 => isSite ? "Je reprends votre logo et vos couleurs" : "Je vous propose des couleurs",
+        3 => isSite ? "Je choisis vos photos" : "Je cherche des photos sans personne",
+        4 => "J'écris vos pages",
+        5 => st.Brief.City is { } city ? (st.Weather != null || steps[4].State == "go" ? $"J'ajoute l'heure et la météo de {city}" : $"J'ajoute l'heure de {city}") : "Heure et météo",
+        _ => $"Je monte votre liste « {ListName} »",
+    };
+
+    private RenderFragment Detail(Step s) => __builder =>
+    {
+        if (s.State == "err") { <div class="det err">@s.Note</div> return; }
+        if (s.State == "go" && s.N != 4) return;
+        switch (s.N)
+        {
+            case 1:
+                <div class="det">@(site != null ? $"{site.Host} · {site.Pages} page{(site.Pages > 1 ? "s" : "")} lue{(site.Pages > 1 ? "s" : "")}{(st.Brief.City != null ? " · " + st.Brief.City : "")}" : string.Join(" · ", new[] { st.Brief.Activity, st.Brief.City ?? "" }.Where(x => x.Length > 0)))</div>
+                break;
+            case 2:
+                <div class="det">
+                    @if (Logo is { } lg) { <span class="lgm"><img src="@Thumb(lg, 80)" alt="" /></span> }
+                    <span class="sw">@Swatches</span>
+                    <span>@(isSite ? (Logo == null ? "logo non trouvé : envoyez-le plus tard" : "") : "sobres et chaleureuses, modifiables")</span>
+                </div>
+                break;
+            case 3:
+                <div class="det">
+                    <span class="ths">@foreach (var p in Photos.Take(4)) { <i style="background-image:url('@Thumb(p, 120)')"></i> }</span>
+                    <span>@(samples ? "images d'exemple, à remplacer par les vôtres" : $"{Photos.Count} photo{(Photos.Count > 1 ? "s" : "")}{(isSite && s.Note != "web" ? " de votre site" : " libres de droits")}, rangée{(Photos.Count > 1 ? "s" : "")} dans la médiathèque")</span>
+                </div>
+                break;
+            case 4:
+                <div class="det"><span class="pg-chips">@foreach (var k in StartTemplates.Kinds.Where(k => st.Pages.ContainsKey(k))) { <span>@StartTemplates.Name(st.Brief.Pages, k, false)</span> }</span></div>
+                break;
+            case 5:
+                <div class="det">@(s.State == "skip" ? "Pas de ville trouvée : ni heure ni météo." : s.Note is { Length: > 0 } n ? n : isSite ? "Ville trouvée sur votre site" : "D'après votre message")</div>
+                break;
+            case 6:
+                <div class="det">@Cards.Count contenus · @Helpers.FormatDuration(Cards.Count * AiStarter.PageSeconds) · en boucle, en fondu</div>
+                break;
+        }
+    };
+
+    // ---------- Préparation ----------
+
+    protected override void OnInitialized() => Reload();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) _ = Run();
+        if (!composeInit && view == "build")
+        {
+            composeInit = true;
+            await Js("linkiiStart.compose", composeTa, composeForm);
+        }
+        if (tvDirty && tvMode == "play" && view == "build" && token != null) { tvDirty = false; await Js("linkiiStart.tv", tvHost, filmEl, "/player/?preview=" + token, tvAt); }
+        if (readyDirty && view == "ready" && token != null) { readyDirty = false; await Js("linkiiStart.tv", readyHost, null, "/player/?preview=" + token, 0); await Js("linkiiStart.confetti", readyRoot); }
+        if (scroll) { scroll = false; await Js("linkiiStart.end", threadEl); }
+    }
+
+    private async Task Js(string fn, params object?[] args)
+    {
+        try { await JS.InvokeVoidAsync(fn, args); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    private void Reload() => files = Store.Read(d => d.Media.ToList());
+
+    private void Go(int n) { steps[n - 1].State = "go"; scroll = true; StateHasChanged(); }
+    private void Ok(int n, string? note = null) { steps[n - 1].State = "ok"; steps[n - 1].Note = note; scroll = true; StateHasChanged(); }
+
+    private async Task Run()
+    {
+        var ct = cts.Token;
+        isSite = AiStarter.LooksLikeUrl(Ask);
+        running = true; failure = null;
+        var at = 1;
+        try
+        {
+            Go(1);
+            await Task.Delay(500, ct);
+            if (isSite)
+            {
+                var (s, err) = await Starter.ReadSite(Ask, ct);
+                if (s == null) { Fail(1, err!); return; }
+                site = s;
+                Ok(1); at = 2; Go(2);
+            }
+            var (b, p, e) = await Starter.Brief(Ask, site, ct);
+            if (b == null) { Fail(at, e!); return; }
+            st.Brief = b; pick = p;
+            if (!isSite) { Ok(1); StateHasChanged(); await Task.Delay(900, ct); at = 2; Go(2); await Task.Delay(700, ct); }
+            if (site != null) { st.Brief.Logo = await Starter.ImportLogo(site, pick.Logo, ct); Reload(); }
+            Ok(2);
+
+            at = 3; Go(3);
+            var photos = site != null ? await Starter.SitePhotos(site, pick, 4, ct) : new List<Guid>();
+            var fromSite = photos.Count;
+            if (photos.Count < 2) photos.AddRange(await Starter.WebPhotos(pick.Queries, 4 - photos.Count, false, ct));
+            if (photos.Count == 0) { photos.AddRange(await Starter.SamplePhotos(4, ct)); samples = true; }
+            st.Brief.Photos = photos;
+            Reload();
+            Ok(3, fromSite < photos.Count && !samples ? "web" : null);
+            await StepChanged.InvokeAsync(2);
+            await Task.Delay(600, ct);
+
+            at = 4; Go(4); tvMode = "write";
+            foreach (var k in StartTemplates.Kinds.Where(k => StartTemplates.Has(st.Brief.Pages, k)))
+            {
+                ct.ThrowIfCancellationRequested();
+                if (Starter.SavePage(st, k, false) is not { } id) continue;
+                writing = id; Reload(); scroll = true; StateHasChanged();
+                await Task.Delay(1500, ct);
+            }
+            if (st.Pages.Count == 0) { Fail(4, "Les pages n'ont pas pu être enregistrées."); return; }
+            Ok(4);
+
+            at = 5; Go(5);
+            if (st.Brief.City == null) { await Task.Delay(400, ct); steps[4].State = "skip"; }
+            else
+            {
+                var (wid, note) = await Starter.Weather(st);
+                Reload();
+                await Task.Delay(600, ct);
+                Ok(5, wid == null ? note : null);
+            }
+
+            at = 6; Go(6);
+            Starter.SaveList(st);
+            Reload();
+            await Task.Delay(900, ct);
+            Ok(6);
+            Finished();
+        }
+        catch (OperationCanceledException) when (!disposed) { Stopped(at); }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) when (!disposed)
+        {
+            Log.LogWarning(ex, "Premiers pas avec l'assistant : préparation interrompue.");
+            Fail(at, "Une erreur m'a arrêté. Réessayez, ou ajoutez vos contenus vous-même.");
+        }
+    }
+
+    private void Fail(int n, string message)
+    {
+        running = false;
+        steps[n - 1].State = "err"; steps[n - 1].Note = message;
+        failure = message;
+        if (st.Pages.Count > 0) { Starter.SaveList(st); Finished(); return; }   // pages déjà écrites : on les garde dans la liste
+        scroll = true;
+        StateHasChanged();
+    }
+
+    private void Stopped(int at)
+    {
+        running = false;
+        if (st.Pages.Count > 0)
+        {
+            foreach (var s in steps.Where(s => s.State == "go")) s.State = "skip";
+            Starter.SaveList(st); Reload();
+            msgs.Add(new Msg { Html = (MarkupString)$"Arrêté. Je garde les {st.Pages.Count} page{(st.Pages.Count > 1 ? "s" : "")} déjà prête{(st.Pages.Count > 1 ? "s" : "")} dans la liste « {ListName} »." });
+            Finished();
+            return;
+        }
+        steps[at - 1].State = "err"; steps[at - 1].Note = "Arrêté.";
+        failure = "Arrêté avant d'avoir créé une page. Rien n'a été ajouté à vos listes.";
+        scroll = true;
+        StateHasChanged();
+    }
+
+    private void Finished()
+    {
+        running = false; built = true; failure = null;
+        tvMode = "play"; NewToken();
+        var pages = st.Pages.Count;
+        chatId = Starter.SaveChat(null, Ask, $"Liste « {ListName} » préparée : {pages} page{(pages > 1 ? "s" : "")}{(st.Weather != null ? " et la météo de " + st.Brief.City : "")}, rien n'est diffusé.",
+            new[] { ($"{pages} compositions créées", "fait"), ($"Liste « {ListName} » créée", "fait") });
+        Reload();
+        scroll = true;
+        StateHasChanged();
+    }
+
+    private void Stop() { if (running) cts.Cancel(); }
+
+    private void Retry()
+    {
+        cts = new CancellationTokenSource();
+        foreach (var s in steps) { s.State = "wait"; s.Note = null; }
+        st = new StartState(); site = null; pick = StartPick.None; failure = null; samples = false; tvMode = "read"; writing = null;
+        _ = Run();
+    }
+
+    private void NewToken()
+    {
+        if (st.ListId is not { } lid) return;
+        token = Grants.Create(new PreviewGrant(Store.ClientId, null, null, lid, st.Portrait ? "portrait" : "landscape", st.Portrait ? "1080x1920" : "1920x1080", 1, 1));
+        tvDirty = true; readyDirty = view == "ready";
+    }
+
+    // ---------- Retouches en discutant ----------
+
+    private async Task Send()
+    {
+        var text = say.Trim();
+        if (text.Length < 2 || !built || busy) return;
+        say = "";
+        await Adjust("free", text);
+    }
+
+    private async Task Adjust(string kind, string? text = null)
+    {
+        if (busy || !built) return;
+        var ask = kind switch
+        {
+            "warm" => "Plus chaleureux",
+            "short" => "Plus court",
+            "en" => st.Bilingual ? "Sans l'anglais" : "Aussi en anglais",
+            "portrait" => st.Portrait ? "Revenir au paysage" : "Version portrait",
+            _ => text ?? "",
+        };
+        msgs.Add(new Msg { Mine = true, Text = ask });
+        busy = true; scroll = true;
+        StateHasChanged();
+        var before = st.Save();
+        var ct = cts.Token;
+        string? error = null, html = null, receipt = null;
+        var focus = 0;
+        try
+        {
+            switch (kind)
+            {
+                case "warm":
+                case "short":
+                case "free":
+                    var request = kind == "warm" ? "Rends tous les textes plus chaleureux et accueillants, sans changer les faits."
+                        : kind == "short" ? "Raccourcis tous les textes d'environ un tiers ; garde l'essentiel et les faits." : text!;
+                    var (nb, summary, err) = await Starter.Change(st.Brief, request, ct);
+                    if (nb == null) { error = err; break; }
+                    var changes = Diff(st.Brief, nb);
+                    if (changes.Count == 0 && nb.Colors.Deep == st.Brief.Colors.Deep && nb.Colors.Accent == st.Brief.Colors.Accent && nb.Font == st.Brief.Font)
+                    { error = "Je n'ai rien trouvé à changer pour cette demande. Reformulez, ou faites-le ensuite dans l'éditeur."; break; }
+                    st.Brief = nb;
+                    Starter.Apply(st);
+                    focus = changes.Count > 0 ? Math.Max(0, st.Order().IndexOf(st.Pages.GetValueOrDefault(changes[0].Kind))) : 0;
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append(Enc(summary.Length > 0 ? summary : "C'est fait."));
+                    foreach (var c in changes.Take(2))
+                        sb.Append("<span class=\"pa-diff\">").Append(c.Old.Length > 0 ? "<del>" + Enc(c.Old) + "</del>" : "").Append("<ins>").Append(Enc(c.New)).Append("</ins></span>");
+                    html = sb.ToString();
+                    var kinds = changes.Select(c => c.Kind).Distinct().ToList();
+                    receipt = kinds.Count > 1 ? $"{kinds.Count} pages modifiées" : kinds.Count == 1 ? $"« {StartTemplates.Name(st.Brief.Pages, kinds[0], false)} » modifiée" : "Couleurs modifiées";
+                    break;
+                case "en":
+                    if (st.Bilingual)
+                    {
+                        st.Bilingual = false; Starter.Apply(st);
+                        html = "J'ai retiré les versions anglaises : la liste est de nouveau en français seulement.";
+                        receipt = "Versions anglaises retirées";
+                        break;
+                    }
+                    if (st.Brief.En == null)
+                    {
+                        var (en, terr) = await Starter.Translate(st.Brief, ct);
+                        if (en == null) { error = terr; break; }
+                        st.Brief.En = en;
+                    }
+                    st.Bilingual = true; Starter.Apply(st);
+                    focus = 1;
+                    html = "Chaque page est maintenant suivie de sa <b>version anglaise</b>. Les traductions se retouchent ensuite une à une, comme toute composition.";
+                    receipt = $"{st.EnPages.Count} pages en anglais ajoutées";
+                    break;
+                case "portrait":
+                    st.Portrait = !st.Portrait; Starter.Apply(st);
+                    html = st.Portrait ? "Voici votre liste pour un <b>écran vertical</b> : chaque page est réorganisée, rien à refaire." : "Retour au format <b>paysage</b> : chaque page est réorganisée.";
+                    receipt = st.Portrait ? "Version portrait" : "Format paysage";
+                    break;
+            }
+        }
+        catch (OperationCanceledException) { busy = false; return; }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Premiers pas : retouche en échec.");
+            st.Restore(before); Starter.Apply(st);
+            error = "Cette modification n'a pas pu être faite. Rien n'a changé.";
+        }
+        busy = false;
+        if (error != null) msgs.Add(new Msg { Html = (MarkupString)Enc(error), Failed = true });
+        else
+        {
+            msgs.Add(new Msg { Html = (MarkupString)html!, Receipt = receipt, Undo = before });
+            tvAt = focus; NewToken(); Reload();
+            chatId = Starter.SaveChat(chatId, ask, System.Text.RegularExpressions.Regex.Replace(html!.Replace("<del>", " (avant : ").Replace("</del>", ")"), "<[^>]+>", " ").Trim(), new[] { (receipt ?? ask, "fait") });
+        }
+        scroll = true;
+        StateHasChanged();
+    }
+
+    private void Undo(Msg m)
+    {
+        if (busy || m.Undo == null || m.Undone) return;
+        st.Restore(m.Undo);
+        Starter.Apply(st);
+        var i = msgs.IndexOf(m);
+        foreach (var later in msgs.Skip(i).Where(x => x.Undo != null)) later.Undone = true;   // annuler revient à l'état d'avant cette retouche, et donc d'avant les suivantes
+        tvAt = 0; NewToken(); Reload();
+        chatId = Starter.SaveChat(chatId, "Annuler", "Retouche annulée.", new[] { (m.Receipt ?? "Retouche", "annulé") });
+    }
+
+    private async Task LogoPicked(InputFileChangeEventArgs e)
+    {
+        if (!built || busy) return;
+        msgs.Add(new Msg { Mine = true, Text = "Mon logo : " + e.File.Name });
+        busy = true; scroll = true;
+        StateHasChanged();
+        var before = st.Save();
+        var r = await Importer.Import(e.File, Store.ClientId, null, cts.Token, Store.AreaId, null, Store.UserId);
+        busy = false;
+        if (r.Item is not { Type: "image" } logo) { msgs.Add(new Msg { Html = (MarkupString)Enc(r.Error ?? "Ce fichier n'est pas une image."), Failed = true }); scroll = true; return; }
+        st.Brief.Logo = logo.Id;
+        Starter.Apply(st);
+        msgs.Add(new Msg { Html = (MarkupString)"Votre logo est maintenant sur chaque page, sur une plaque blanche pour rester lisible.", Receipt = "Logo ajouté", Undo = before });
+        tvAt = 0; NewToken(); Reload();
+        chatId = Starter.SaveChat(chatId, "Mon logo", "Logo ajouté sur chaque page.", new[] { ("Logo ajouté", "fait") });
+        scroll = true;
+    }
+
+    private sealed record Change(string Kind, string Old, string New);
+
+    /// <summary>Textes changés entre deux contenus, page par page (les deux premiers sont montrés avant / après).</summary>
+    private static List<Change> Diff(StartBrief a, StartBrief b)
+    {
+        static IEnumerable<(string Kind, string Text)> Flat(StartPages p)
+        {
+            foreach (var t in new[] { p.Welcome.Kicker, p.Welcome.Title, p.Welcome.Sub }) yield return ("welcome", t);
+            foreach (var t in new[] { p.Services.Kicker, p.Services.Title }.Concat(p.Services.Points)) yield return ("services", t);
+            if (p.Info != null) foreach (var t in new[] { p.Info.Kicker, p.Info.Title }.Concat(p.Info.Cards.SelectMany(c => new[] { c.Label, c.Value, c.Note }))) yield return ("info", t);
+            if (p.News != null) foreach (var t in new[] { p.News.Tag, p.News.Title, p.News.Sub }) yield return ("news", t);
+            foreach (var t in new[] { p.Thanks.Title, p.Thanks.Sub }) yield return ("thanks", t);
+        }
+        var x = Flat(a.Pages).ToList(); var y = Flat(b.Pages).ToList();
+        var list = new List<Change>();
+        foreach (var k in StartTemplates.Kinds)
+        {
+            var xa = x.Where(v => v.Kind == k).Select(v => v.Text).ToList();
+            var ya = y.Where(v => v.Kind == k).Select(v => v.Text).ToList();
+            for (var i = 0; i < Math.Max(xa.Count, ya.Count); i++)
+            {
+                var o = i < xa.Count ? xa[i] : ""; var n = i < ya.Count ? ya[i] : "";
+                if (o != n) list.Add(new Change(k, o, n.Length > 0 ? n : "(retiré)"));
+            }
+        }
+        return list;
+    }
+
+    private static string Enc(string s) => WebUtility.HtmlEncode(s);
+
+    // ---------- C'est prêt ----------
+
+    private async Task ToReady()
+    {
+        if (!built || st.ListId is not { } lid) return;
+        share = Grants.Share(Store.ClientId, lid, st.Portrait ? "portrait" : "landscape");
+        view = "ready"; readyDirty = true; tvDirty = true; composeInit = false;
+        await StepChanged.InvokeAsync(3);
+    }
+
+    private async Task BackToList()
+    {
+        view = "build"; tvDirty = true; scroll = true;
+        await StepChanged.InvokeAsync(2);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        await Js("linkiiStart.stop");
+    }
+}

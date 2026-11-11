@@ -596,7 +596,7 @@
   // Le média téléchargé est relu depuis le cache du navigateur sous forme de blob : lecture hors ligne fiable,
   // sans réseau ni service worker, pour les images comme pour les vidéos (tous formats convertis en MP4 H.264 par le serveur).
   function mediaSrc(url) {
-    var online = PREVIEW ? url : url + '?t=' + encodeURIComponent(state.token || '');   // repli en ligne : jeton de l'écran dans l'adresse (aperçu : session du back-office)
+    var online = PREVIEW ? url + (url.indexOf('?') < 0 ? '?' : '&') + 'pv=' + PREVIEW : url + '?t=' + encodeURIComponent(state.token || '');   // repli en ligne : jeton de l'écran dans l'adresse (aperçu : son jeton, qui suffit aussi sur un téléphone sans compte)
     if (NATIVE) return Promise.resolve({ src: online, revoke: function () {} });   // l'app sert le fichier local s'il existe (le jeton ne sert qu'en repli en ligne)
     if (PREVIEW || !window.caches || !window.URL || !URL.createObjectURL) return Promise.resolve({ src: online, revoke: function () {} });
     return caches.open(CACHE).then(function (c) { return c.match(url); }).then(function (hit) {

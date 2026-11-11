@@ -33,7 +33,16 @@ Toute l'IA qu'on demande passe par un seul endroit : le panneau ancré à droite
 - **La page ouverte** : pastille « Sur cette page » ; l'IA reçoit le nom et l'adresse de la page, sauf si on retire la pastille.
 - **Cartes des pages** : une page pose sa carte avec `Panel.Show(clé, demande, origine, contenu, résumé)` et la retire avec `Panel.Release(clé)` (au plus tard en se fermant). Le contenu reste celui de la page (ses boutons appellent la page) ; la page appelle `Panel.Refresh()` quand il change, `Panel.Save()` quand le résumé change. Il reste le résumé dans la discussion. Cartes actuelles : Améliorer (`AiImprove`, éditeur de compositions), relecture (`PlaylistEditor`), Créer avec l'IA (`CompositionsPage`). **Toute nouvelle fonction IA d'une page passe par une carte**, pas par une fenêtre.
 - **Discussions gardées** (`Db.AiChats`, règles dans `AiChats`) : par personne et par organisation, visibles par leur auteur seul (ni l'administrateur ni les autres membres) ; effacées 30 jours après le dernier échange, au plus 50, les épinglées gardées ; titre fait tout seul, renommable. « Discussions récentes » (horloge) : rubriques, recherche, épingler, renommer, effacer, tout effacer. Une discussion reprise se continue : l'IA reçoit les anciens échanges en résumé et les 6 derniers en entier ; « Annuler » n'est plus proposé pour les anciennes actions.
-- **Hors du panneau** : la description automatique des images (rien n'est demandé), « Décrire cette image » de la médiathèque, la composition depuis un site des Premiers pas.
+- **Hors du panneau** : la description automatique des images (rien n'est demandé), « Décrire cette image » de la médiathèque, la composition depuis un site des Premiers pas, et les Premiers pas avec l'assistant (leur discussion est quand même rangée dans les discussions gardées).
+
+## Premiers pas avec l'assistant (§232)
+
+L'étape 1 des Premiers pas devient une zone de l'IA quand l'organisation y a droit : une adresse de site ou une phrase, puis l'assistant prépare tout en direct (maquette `maquettes/premiers-pas-assistant-ia.html`).
+
+- **Code** : `AiStart.cs` (`AiStarter` : lecture du site, demande à l'IA, logo, photos, pages, météo, liste, retouches, discussion gardée), `StartTemplates.cs` (contenu `StartBrief` et modèles de pages), `Components/AiStartView.razor` (discussion, écran en direct, « C'est prêt »), `wwwroot/start-ai.js`, hébergé par `WelcomeWizard.razor`.
+- **L'IA écrit, Linkivi met en page** : une demande rend le contenu (textes, couleurs, police, choix du logo et des photos, en voyant les images réduites du site) ; les pages viennent de modèles Linkivi, donc toujours propres. Les retouches (plus chaleureux, plus court, demande libre, anglais) modifient ce contenu, puis les pages sont redessinées ; portrait et logo sans IA ; chaque retouche s'annule.
+- **Aperçu sur téléphone** : QR vers le player en mode aperçu, lien de 24 h gardé dans la base (`PreviewGrants.Share`), fichiers servis avec `?pv=jeton`.
+- **Coût** : 1 demande pour préparer, 1 par retouche de l'IA.
 
 ## Garde-fous
 

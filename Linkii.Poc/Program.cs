@@ -84,6 +84,7 @@ builder.Services.AddSingleton<AiMedia>();   // médiathèque intelligente (piste
 builder.Services.AddScoped<AiAssistant>();   // assistant : réponses et actions confirmées (piste 5)
 builder.Services.AddSingleton<AiCompose>();   // compositions créées par l IA : depuis une phrase, depuis le site web (piste 4)
 builder.Services.AddSingleton<WebImages>();   // images d'illustration d'internet (Pexels) pour les compositions de l IA
+builder.Services.AddScoped<AiStarter>();   // Premiers pas avec l assistant : site ou phrase -> pages, météo, liste (§232)
 builder.Services.AddSingleton<SafeHttp>();
 builder.Services.AddSingleton<IAppProvider, WeatherProvider>();
 builder.Services.AddSingleton<IAppProvider, WeatherSlideProvider>();
@@ -712,18 +713,20 @@ app.MapGet("/download/relay/{os}", async (HttpContext ctx, string os) =>
 // Autorisé : un écran du client propriétaire (en-tête X-Token ou ?t=) ou un utilisateur connecté sur l'espace de ce client.
 // Tout le reste reçoit 404, pour ne pas révéler l'existence d'un fichier d'un autre client.
 var mediaTypes = new FileExtensionContentTypeProvider();
-app.MapGet("/media/{file}", async (HttpContext ctx, string file, JsonStore store, VideoConverter converter) =>
+app.MapGet("/media/{file}", async (HttpContext ctx, string file, JsonStore store, VideoConverter converter, PreviewGrants grants) =>
 {
     if (file != Path.GetFileName(file)) return Results.NotFound();
     var token = ctx.Request.Headers["X-Token"].ToString();
     if (string.IsNullOrEmpty(token)) token = ctx.Request.Query["t"].ToString();
     var userClient = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.GetGuid(Claims.Client) : null;
+    // aperçu (?pv=jeton) : le player en mode aperçu, y compris sur un téléphone sans compte (lien des Premiers pas, 24 h)
+    var previewClient = ctx.Request.Query["pv"].ToString() is { Length: > 0 } pv ? grants.Find(pv)?.ClientId : null;
 
     var m = store.Read(db =>
     {
         var it = db.Media.FirstOrDefault(x => x.FileName == file);
         if (it == null) return null;
-        if (userClient == it.ClientId) return it;
+        if (userClient == it.ClientId || previewClient == it.ClientId) return it;
         return !string.IsNullOrEmpty(token) && db.Screens.Any(s => s.Token == token && s.ClientId == it.ClientId && Tenancy.IsActive(db, s)) ? it : null;
     });
     var path = m?.FilePath;   // media/{organisation}/{membre}/{fichier} : l'adresse, elle, ne change pas

@@ -14,10 +14,11 @@
 @inject IWebHostEnvironment Env
 @inject AiService AiSvc
 @inject AiCompose AiComp
+@inject AiStarter Starter
 
 @* masqué (sans perdre son état) pendant l'aperçu, qui s'ouvre en plein écran *@
 <div class="fs-wiz pp-wiz" style="@(previewing || Away ? "display:none" : null)">
-<div class="fs-modal pp-modal s@(step)" role="dialog" aria-modal="true" aria-labelledby="pp-q">
+<div class="fs-modal pp-modal s@(step) @(aiAsk != null ? "pa-on" : step == 1 && HeroShown ? "pa-hero" : "")" role="dialog" aria-modal="true" aria-labelledby="pp-q">
     <div class="fs-top">
         <Logo Size="26" />
         <div class="pp-steps" aria-label="Étape @step sur 3">
@@ -29,7 +30,16 @@
     @* le champ de fichiers caché sert à « Depuis l'ordinateur » et à la zone de dépôt ; il reste monté pour que les envois continuent *@
     <MediaUploader InputId="pp-files" OnImported="FileImported" ShowJobs="false" Changed="StateHasChanged" @ref="uploader" />
 
-    @if (step == 1)
+    @if (aiAsk != null)
+    {
+        @* l'assistant prépare tout : discussion, aperçu en direct, puis « C'est prêt » (§232) *@
+        <AiStartView Ask="@aiAsk" HasScreen="hasScreen" StepChanged="s => step = s" Back="AiBack" EditMyself="AiEdit" Finish="Later" ConnectScreen="ConnectScreen" />
+    }
+    else if (step == 1 && HeroShown)
+    {
+        @Hero()
+    }
+    else if (step == 1)
     {
         var running = Jobs.Count(j => j.State == "running");
         var empty = entries.Count == 0 && Jobs.Count == 0;
@@ -307,6 +317,106 @@
     private string? flowInitId;
     private DotNetObjectReference<WelcomeWizard>? self;
 
+    // ---------- Accueil de l'assistant (§232) : une adresse ou une phrase, et l'assistant prépare tout ----------
+    private bool aiReady;
+    private string? aiAsk;
+    private string heroText = "";
+    private ElementReference heroTa, heroForm;
+    private string? heroInit;
+
+    /// <summary>L'accueil de l'assistant remplace l'étape 1 tant que rien n'a été ajouté à la main (IA indisponible : l'étape 1 habituelle).</summary>
+    private bool HeroShown => aiReady && entries.Count == 0 && Jobs.Count == 0;
+
+    private static readonly (string Icon, string Label, string Text)[] Ideas =
+    [
+        ("door", "Accueillir mes visiteurs", "Accueillir nos visiteurs : un mot de bienvenue, nos services et les infos pratiques."),
+        ("tag", "Montrer mes offres", "Mettre en avant nos offres du moment et nos nouveautés."),
+        ("users", "Informer mon équipe", "Informer l'équipe : annonces, agenda de la semaine et bienvenue aux nouveaux."),
+        ("info", "Patienter agréablement", "Une salle d'attente : infos pratiques, météo et actualités."),
+    ];
+
+    private RenderFragment Hero() => __builder =>
+    {
+        var trial = Store.Read(d => d.Tenant.InTrial(DateTime.UtcNow) && !d.Tenant.Subscribed);
+        <div class="pa-s1" @ondragenter="() => hot = true">
+            <span class="pa-kick"><span class="nw">Nouveau</span><Ico Name="spark" Size="15" /> L'assistant Linkivi fait le travail pour vous</span>
+            <h1 class="pa-h1" id="pp-q">Votre premier écran,<br /><em>prêt en une minute.</em></h1>
+            <p class="pa-sub">Donnez l'adresse de votre site ou décrivez votre activité en une phrase. L'assistant prépare vos pages, les met en liste et vous montre le résultat sur un écran.</p>
+            <form class="pa-box @(AiStarter.LooksLikeUrl(heroText) ? "url" : "")" @ref="heroForm" @onsubmit="AiStart" @onsubmit:preventDefault>
+                <div class="pa-box-in">
+                    <textarea @ref="heroTa" rows="2" @bind="heroText" @bind:event="oninput" maxlength="@AiStarter.MaxAsk" aria-label="L'adresse de votre site, ou votre activité en une phrase"></textarea>
+                    <div class="pa-box-f">
+                        <span class="pa-det"><Ico Name="globe" Size="15" /> Site web reconnu : l'assistant le lira</span>
+                        <button type="submit" class="pa-go"><Ico Name="spark" Size="18" /> Préparer mon écran</button>
+                    </div>
+                </div>
+            </form>
+            @if (error != null) { <div class="err fs-err">@error</div> }
+            <div class="pa-ideas">
+                <span>Pas de site ? Partez d'une idée :</span>
+                @foreach (var idea in Ideas)
+                {
+                    var it = idea;
+                    <button type="button" @onclick="() => { heroText = it.Text; error = null; }"><Ico Name="@it.Icon" Size="15" /> @it.Label</button>
+                }
+            </div>
+            <div class="pa-trust">
+                <span><Ico Name="check" Size="15" /> Rien n'est diffusé sans vous</span>
+                <span><Ico Name="check" Size="15" /> Tout reste modifiable</span>
+                <span><Ico Name="check" Size="15" /> @(trial ? "Inclus dans votre essai" : "Compris dans votre plan Pro")</span>
+            </div>
+            <div class="pa-or">ou ajoutez vos contenus vous-même</div>
+            <div class="pa-man">
+                <label class="btn ghost" for="pp-files"><Ico Name="upload" Size="16" /> Depuis l'ordinateur</label>
+                <button type="button" class="btn ghost @(panel == "cloud" ? "on" : "")" aria-expanded="@(panel == "cloud" ? "true" : "false")" @onclick='() => Toggle("cloud")'>
+                    <Ico Name="cloud" Size="16" /> Depuis le cloud
+                    <span class="pp-logos" aria-hidden="true">@foreach (var b in new[] { "gdrive", "onedrive", "dropbox", "canva" }) { <svg width="16" height="16"><use href="/brand-logos.svg#@b" width="100%" height="100%"></use></svg> }</span>
+                </button>
+                <button type="button" class="btn ghost @(panel == "link" ? "on" : "")" aria-expanded="@(panel == "link" ? "true" : "false")" @onclick='() => Toggle("link")'><Ico Name="link" Size="16" /> Page web ou lien</button>
+                <button type="button" class="btn ghost @(panel == "tpl" ? "on" : "")" aria-expanded="@(panel == "tpl" ? "true" : "false")" @onclick='() => Toggle("tpl")'><Ico Name="grid" Size="16" /> Partir d'un modèle</button>
+            </div>
+            @if (panel == "cloud") { <div class="pp-panel pa-panel"><DocumentImporter OnImported="DocImported" /></div> }
+            else if (panel == "link")
+            {
+                <form class="pp-panel pp-link pa-panel" @onsubmit="AddLink" @onsubmit:preventDefault>
+                    <input type="text" inputmode="url" autocomplete="url" @bind="linkUrl" @bind:event="oninput" placeholder="Collez une adresse : site web, image ou vidéo en ligne" aria-label="Adresse web" />
+                    <button type="submit" class="btn" disabled="@busy">Ajouter</button>
+                </form>
+            }
+            else if (panel == "tpl") { <div class="pp-panel pp-starts pa-panel">@Starts(true)</div> }
+            <p class="pa-drop">Vous pouvez aussi glisser vos fichiers n'importe où dans cette fenêtre.</p>
+            @if (hot)
+            {
+                <div class="pa-dropov">
+                    <InputFile class="pa-dropin" OnChange="Dropped" multiple title="" aria-label="Déposer des fichiers" @ondragleave="() => hot = false" @ondrop="() => hot = false" />
+                    <span><Ico Name="upload" Size="28" /> Déposez vos fichiers : ils rejoignent votre médiathèque</span>
+                </div>
+            }
+        </div>
+    };
+
+    private void AiStart()
+    {
+        var t = heroText.Trim();
+        if (t.Length < 4) { error = "Écrivez l'adresse de votre site, ou décrivez votre activité en une phrase."; return; }
+        if (!Starter.Available()) { aiReady = false; error = AiService.Say(AiSvc.State(Store.ClientId, "compose")); return; }
+        error = null; panel = null;
+        aiAsk = t;
+    }
+
+    /// <summary>« Changer ma demande » : retour à l'accueil de l'assistant, la phrase gardée.</summary>
+    private void AiBack() { aiAsk = null; step = 1; heroInit = null; }
+
+    /// <summary>« Modifier moi-même » : l'étape « Votre liste » habituelle, sur la liste préparée par l'assistant.</summary>
+    private void AiEdit(Guid id)
+    {
+        listId = id;
+        Reload();
+        listName = List?.Name ?? AiStarter.ListName;
+        aiAsk = null;
+        step = 2;
+    }
+
     private IReadOnlyList<MediaUploader.UploadJob> Jobs => uploader?.Jobs ?? Array.Empty<MediaUploader.UploadJob>();
     private Playlist? List => listId is { } id ? Store.Read(d => d.Playlists.FirstOrDefault(p => p.Id == id)) : null;
     private MediaItem? Item(Guid id) => all.FirstOrDefault(m => m.Id == id);
@@ -344,6 +454,7 @@
         Welcome.Changed += OnWelcomeChanged;
         if (Welcome.Panel is { } first) { panel = first; Welcome.Panel = null; }
         Reload();
+        aiReady = panel == null && Starter.Available();   // retour d'un assistant d'application : l'étape habituelle, son panneau ouvert
         // assistant rouvert : la liste déjà créée garde son nom et la durée de ses images
         var list = Store.Read(d => d.Tenant.FirstScreenListId is { } lid ? d.Playlists.FirstOrDefault(p => p.Id == lid) : null);
         (imageSec, hasScreen) = Store.Read(d => (d.Tenant.DefaultDurationSec, FirstScreen.HasScreen(d)));
@@ -365,6 +476,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // accueil de l'assistant : exemples qui s'écrivent dans la zone, Entrée pour lancer (start-ai.js)
+        if (aiAsk == null && step == 1 && HeroShown && heroTa.Context != null && heroTa.Id != heroInit)
+        {
+            heroInit = heroTa.Id;
+            try { await JS.InvokeVoidAsync("linkiiStart.hero", heroTa, heroForm); } catch (JSException) { } catch (JSDisconnectedException) { }
+        }
         // fil de l'étape 2 : glisser-déplacer de l'éditeur de liste (playlist-flow.js, MoveItem)
         if (step == 2 && flowRoot.Context != null && flowRoot.Id != flowInitId)
         {

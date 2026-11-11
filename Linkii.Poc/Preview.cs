@@ -9,28 +9,61 @@ namespace Linkii.Poc;
 /// </summary>
 public record PreviewGrant(Guid ClientId, Guid? ScreenId, Guid? WallZoneId, Guid? PlaylistId, string Orientation, string Resolution, int Cols, int Rows, Guid? InteractiveListId = null);
 
+/// <summary>Lien d'aperçu d'une liste à ouvrir sur un téléphone (QR des Premiers pas) : sans compte, en lecture seule, jusqu'à <see cref="Until"/>.</summary>
+public class PreviewShare
+{
+    public string Token { get; set; } = "";
+    public Guid ClientId { get; set; }
+    public Guid PlaylistId { get; set; }
+    public string Orientation { get; set; } = "landscape";
+    public DateTime Until { get; set; }
+}
+
 /// <summary>
 /// Jetons d'aperçu du simulateur : créés par le back-office pour une personne qui a accès à l'écran ou à la liste,
 /// en lecture seule, gardés en mémoire et valables 1 h après leur dernière utilisation.
 /// Un aperçu ne compte aucune diffusion, ne marque pas l'écran en ligne et ne reçoit aucun ordre envoyé aux écrans.
+/// Les liens partagés vers un téléphone (<see cref="Share"/>) sont gardés dans la base : ils survivent à un redémarrage et durent 24 h, pas plus.
 /// </summary>
-public class PreviewGrants
+public class PreviewGrants(JsonStore store)
 {
     private static readonly TimeSpan Life = TimeSpan.FromHours(1);
+    public static readonly TimeSpan ShareLife = TimeSpan.FromHours(24);
     private readonly ConcurrentDictionary<string, (PreviewGrant Grant, DateTime Until)> grants = new();
+
+    private static string NewToken(int bytes) => Convert.ToBase64String(RandomNumberGenerator.GetBytes(bytes)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
 
     public string Create(PreviewGrant grant)
     {
         var now = DateTime.UtcNow;
         foreach (var (k, v) in grants) if (v.Until < now) grants.TryRemove(k, out _);
-        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24)).Replace('+', '-').Replace('/', '_');
+        var token = NewToken(24);
         grants[token] = (grant, now + Life);
+        return token;
+    }
+
+    /// <summary>Lien d'aperçu d'une liste pour un téléphone, valable 24 h à partir de maintenant (jeton court : il tient dans un QR lisible).</summary>
+    public string Share(Guid clientId, Guid playlistId, string orientation)
+    {
+        var now = DateTime.UtcNow;
+        var token = "t" + NewToken(15);
+        store.Write(d =>
+        {
+            d.PreviewShares.RemoveAll(s => s.Until < now);
+            d.PreviewShares.Add(new PreviewShare { Token = token, ClientId = clientId, PlaylistId = playlistId, Orientation = orientation == "portrait" ? "portrait" : "landscape", Until = now + ShareLife });
+        });
         return token;
     }
 
     public PreviewGrant? Find(string? token)
     {
-        if (string.IsNullOrEmpty(token) || !grants.TryGetValue(token, out var g)) return null;
+        if (string.IsNullOrEmpty(token)) return null;
+        if (!grants.TryGetValue(token, out var g))
+        {
+            var now = DateTime.UtcNow;
+            var s = store.Read(d => d.PreviewShares.FirstOrDefault(x => x.Token == token && x.Until > now));
+            return s == null ? null : new PreviewGrant(s.ClientId, null, null, s.PlaylistId, s.Orientation, s.Orientation == "portrait" ? "1080x1920" : "1920x1080", 1, 1);
+        }
         if (g.Until < DateTime.UtcNow) { grants.TryRemove(token, out _); return null; }
         grants[token] = (g.Grant, DateTime.UtcNow + Life);
         return g.Grant;

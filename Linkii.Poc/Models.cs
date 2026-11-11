@@ -45,6 +45,8 @@ public class Db
     public List<ScheduledPublication> ScheduledPublications { get; set; } = new();
     /// <summary>Discussions avec l'assistant, gardées pour leur auteur seul (voir <see cref="AiChats"/>).</summary>
     public List<AiChat> AiChats { get; set; } = new();
+    /// <summary>Liens d'aperçu d'une liste sur un téléphone (QR des Premiers pas), valables 24 h (voir <see cref="PreviewGrants.Share"/>).</summary>
+    public List<PreviewShare> PreviewShares { get; set; } = new();
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
