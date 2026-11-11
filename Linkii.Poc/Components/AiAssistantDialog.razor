@@ -3,14 +3,16 @@
 @inject TenantStore Store
 @inject NavigationManager Nav
 
-@* Assistant (piste 5) : on écrit ce qu'on veut savoir ou faire, il répond d'après l'état des écrans et propose des actions. Rien ne part sans « Confirmer » :
-   les actions sont cochées une à une, et l'assistant ne publie ni ne supprime rien. *@
+@* Assistant : on écrit ce qu'on veut savoir ou faire, il répond d'après l'état de l'organisation et propose des actions. Rien ne part sans « Confirmer » :
+   les actions sont cochées une à une, et celles qui peuvent se défaire ont leur « Annuler ». La conversation est gardée : on enchaîne (« et sur l'autre écran aussi »). *@
 <div class="modal-backdrop" @onclick="Close"></div>
-<div class="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="aia-title" style="width:min(560px, calc(100vw - 32px))">
-    <h3 id="aia-title" style="display:flex;align-items:center;gap:8px"><Ico Name="spark" Size="18" /> <span>Assistant</span></h3>
+<div class="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="aia-title" style="width:min(640px, calc(100vw - 32px))">
+    <h3 id="aia-title" style="display:flex;align-items:center;gap:8px"><Ico Name="spark" Size="18" /> <span>Assistant</span>
+        @if (turns.Count > 0) { <span class="grow"></span><button type="button" class="linklike" style="font-size:13px;font-weight:400" disabled="@(busy || running)" @onclick="Reset"><Ico Name="rotate-left" Size="13" /> Nouvelle conversation</button> }
+    </h3>
     @if (state.Status == AiStatus.NeedsPro)
     {
-        <div class="ai-sug up"><Ico Name="crown" Size="16" /><span><b>L'assistant est compris dans le plan Pro.</b> Dites ce que vous voulez (« affiche un message d'accueil dans le hall », « quels écrans sont hors ligne ? ») : il le fait après votre accord.</span><span class="grow"></span><a class="btn sm" href="/settings?tab=abonnement">Voir les plans</a></div>
+        <div class="ai-sug up"><Ico Name="crown" Size="16" /><span><b>L'assistant est compris dans le plan Pro.</b> Dites ce que vous voulez (« affiche un message d'accueil dans le hall », « corrige les textes de la liste Accueil ») : il le fait après votre accord.</span><span class="grow"></span><a class="btn sm" href="/settings?tab=abonnement">Voir les plans</a></div>
     }
     else if (!state.Available)
     {
@@ -18,9 +20,60 @@
     }
     else
     {
-        <p class="hint" style="margin:6px 0 10px">Écrivez ce que vous voulez savoir ou faire sur vos écrans. Rien n'est fait sans votre accord.</p>
-        <textarea style="width:100%" rows="2" maxlength="500" aria-label="Votre demande" placeholder="Par exemple : Affiche « Réunion en salle 2 » pendant une minute sur l'écran du hall" @bind="text" @bind:event="oninput" disabled="@(busy || running)" @onkeydown="Key"></textarea>
-        @if (answer == null)
+        <div class="ai-chat" style="max-height:min(46vh, 420px);overflow:auto;display:grid;gap:10px;margin:8px 0 12px" aria-live="polite">
+            @for (var t = 0; t < turns.Count; t++)
+            {
+                var turn = turns[t];
+                var last = t == turns.Count - 1;
+                <div style="justify-self:end;max-width:88%;background:var(--row);border-radius:10px;padding:8px 12px">@turn.Ask</div>
+                @if (turn.Answer is { } ans)
+                {
+                    <div class="ai-sug" style="margin:0" role="region" aria-label="Réponse de l'assistant">
+                        <p class="ai-sug-t" style="margin:0">@ans.Say</p>
+                        @if (ans.Actions.Count > 0)
+                        {
+                            <ul style="list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px">
+                                @for (var k = 0; k < ans.Actions.Count; k++)
+                                {
+                                    var i = k;
+                                    <li style="display:flex;gap:10px;align-items:flex-start">
+                                        @if (turn.Done.TryGetValue(i, out var res))
+                                        {
+                                            @if (res.Error == null) { <span style="color:#1E8E5A;flex:none"><Ico Name="check" Size="16" /></span> }
+                                            else { <span style="color:#C8372D;flex:none"><Ico Name="alert" Size="16" /></span> }
+                                            <span>
+                                                @ans.Actions[i].Label
+                                                @if (res.Error != null) { <small style="display:block;color:#C8372D">@res.Error</small> }
+                                                else if (res.Info != null) { <small style="display:block;color:var(--muted)">@res.Info</small> }
+                                                @if (res.Error == null && res.Undo != null && !turn.Undone.Contains(i)) { <button type="button" class="linklike" style="font-size:13px" disabled="@running" @onclick="() => Undo(turn, i)">Annuler</button> }
+                                                @if (turn.Undone.Contains(i)) { <small style="display:block;color:var(--muted)">Annulé.</small> }
+                                            </span>
+                                        }
+                                        else if (last)
+                                        {
+                                            <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" checked="@turn.Picked.Contains(i)" disabled="@running" @onchange="() => Toggle(turn, i)" /> <span>@ans.Actions[i].Label</span></label>
+                                        }
+                                        else
+                                        {
+                                            <span style="color:var(--muted)">@ans.Actions[i].Label <small>(non confirmé)</small></span>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        @if (ans.Link != null) { <p style="margin:12px 0 0"><button type="button" class="linklike" @onclick="() => GoLink(ans)">@ans.LinkLabel</button></p> }
+                    </div>
+                }
+            }
+            @if (busy) { <div class="ai-sug loading" role="status"><Ico Name="spark" Size="15" /><span>L'assistant réfléchit</span><span class="ai-dots"><i></i><i></i><i></i></span></div> }
+        </div>
+
+        @if (turns.Count == 0)
+        {
+            <p class="hint" style="margin:6px 0 10px">Écrivez ce que vous voulez savoir ou faire : écrans, listes, compositions, images, calendriers. Rien n'est fait sans votre accord, et l'assistant ne publie pas.</p>
+        }
+        <textarea style="width:100%" rows="2" maxlength="600" aria-label="Votre demande" placeholder="@(turns.Count == 0 ? "Par exemple : Corrige les textes de la liste Accueil, puis mets-la sur l'écran du hall" : "Votre réponse ou votre prochaine demande")" @bind="text" @bind:event="oninput" disabled="@(busy || running)" @onkeydown="Key"></textarea>
+        @if (turns.Count == 0)
         {
             <div class="ai-suggest" style="margin:10px 0 0">
                 <span>Essayez :</span>
@@ -28,46 +81,13 @@
             </div>
         }
         @if (error != null) { <div class="err" role="alert" style="margin-top:12px">@error</div> }
-
-        @if (answer is { } ans)
-        {
-            <div class="ai-sug" style="margin-top:14px" role="region" aria-label="Réponse de l'assistant">
-                <p class="ai-sug-t" style="margin:0">@ans.Say</p>
-                @if (ans.Actions.Count > 0)
-                {
-                    <ul style="list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px">
-                        @for (var k = 0; k < ans.Actions.Count; k++)
-                        {
-                            var i = k;
-                            <li style="display:flex;gap:10px;align-items:flex-start">
-                                @if (done.TryGetValue(i, out var res))
-                                {
-                                    @if (res == null) { <span style="color:#1E8E5A;flex:none"><Ico Name="check" Size="16" /></span> }
-                                    else { <span style="color:#C8372D;flex:none"><Ico Name="alert" Size="16" /></span> }
-                                    <span>@ans.Actions[i].Label
-                                        @if (res != null) { <small style="display:block;color:#C8372D">@res</small> }</span>
-                                }
-                                else
-                                {
-                                    <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" checked="@picked.Contains(i)" disabled="@running" @onchange="() => Toggle(i)" /> <span>@ans.Actions[i].Label</span></label>
-                                }
-                            </li>
-                        }
-                    </ul>
-                }
-                @if (ans.Link != null) { <p style="margin:12px 0 0"><button type="button" class="linklike" @onclick="GoLink">@ans.LinkLabel</button></p> }
-            </div>
-        }
         <div class="modal-actions">
-            <button class="btn ghost" @onclick="Close" disabled="@running">@(answer != null && done.Count > 0 ? "Fermer" : "Annuler")</button>
-            @if (answer is { Actions.Count: > 0 } && PendingCount > 0)
+            <button class="btn ghost" @onclick="Close" disabled="@running">Fermer</button>
+            @if (Pending > 0)
             {
-                <button class="btn" disabled="@(running || picked.Count == 0)" @onclick="Confirm">@if (running) { <span>En cours</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="check" Size="15" /> <span>Confirmer (@picked.Count)</span> }</button>
+                <button class="btn" disabled="@(running || busy || Picked == 0)" @onclick="Confirm">@if (running) { <span>En cours</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="check" Size="15" /> <span>Confirmer (@Picked)</span> }</button>
             }
-            else
-            {
-                <button class="btn" disabled="@(busy || text.Trim().Length < 2)" @onclick="Send">@if (busy) { <span>L'assistant réfléchit</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="spark" Size="15" /> <span>Demander</span> }</button>
-            }
+            <button class="btn @(Pending > 0 ? "ghost" : "")" disabled="@(busy || running || text.Trim().Length < 2)" @onclick="Send"><Ico Name="spark" Size="15" /> <span>Demander</span></button>
         </div>
         <p class="ai-help">Proposé par l'IA, qui peut se tromper : vérifiez les actions avant de confirmer.</p>
     }
@@ -76,60 +96,97 @@
 @code {
     [Parameter] public EventCallback OnClose { get; set; }
 
+    private sealed class Turn
+    {
+        public string Ask = "";
+        public AiAnswer? Answer;
+        public readonly HashSet<int> Picked = new(), Undone = new();
+        public readonly Dictionary<int, AiRun> Done = new();
+    }
+
     private static readonly string[] Examples =
     {
         "Quels écrans sont hors ligne ?",
         "Affiche « Bienvenue » pendant 2 minutes sur tous les écrans",
-        "Redémarre l'écran de l'accueil",
+        "Corrige les textes de la composition Menu du jour",
+        "Cherche mes photos de montagne",
     };
 
     private AiState state = new(AiStatus.Off, 0, 0, false);
     private string text = "";
     private string? error;
     private bool busy, running;
-    private AiAnswer? answer;
-    private readonly HashSet<int> picked = new();
-    private readonly Dictionary<int, string?> done = new();
+    private readonly List<Turn> turns = new();
 
-    private int PendingCount => answer == null ? 0 : answer.Actions.Count - done.Count;
+    private Turn? Current => turns.Count > 0 ? turns[^1] : null;
+    private int Pending => Current?.Answer is { } a ? a.Actions.Count - Current.Done.Count : 0;
+    private int Picked => Current == null ? 0 : Current.Picked.Count(i => !Current.Done.ContainsKey(i));
 
     protected override void OnInitialized() => state = AiSvc.State(Store.ClientId, "assistant");
 
     private void Close() { if (!running) OnClose.InvokeAsync(); }
+    private void Reset() { turns.Clear(); text = ""; error = null; }
 
-    private async Task Key(KeyboardEventArgs e) { if (e.Key == "Enter" && !e.ShiftKey && !busy && answer == null && text.Trim().Length >= 2) await Send(); }
+    private async Task Key(KeyboardEventArgs e) { if (e.Key == "Enter" && !e.ShiftKey && !busy && text.Trim().Length >= 2) await Send(); }
+
+    /// <summary>La conversation envoyée à l'IA : les dernières demandes, ses réponses et ce qui a été fait ou refusé.</summary>
+    private string Conversation()
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var t in turns.TakeLast(6))
+        {
+            sb.Append("Personne : ").Append(t.Ask).Append('\n');
+            if (t.Answer == null) continue;
+            sb.Append("Assistant : ").Append(t.Answer.Say).Append('\n');
+            for (var i = 0; i < t.Answer.Actions.Count; i++)
+                sb.Append("  - ").Append(t.Answer.Actions[i].Label).Append(t.Done.TryGetValue(i, out var r) ? (r.Error == null ? (t.Undone.Contains(i) ? " [fait puis annulé]" : " [fait]") : " [échec : " + r.Error + "]") : " [non confirmé]").Append('\n');
+        }
+        return sb.ToString();
+    }
 
     private async Task Send()
     {
-        busy = true; error = null; answer = null; done.Clear(); picked.Clear();
+        var ask = text.Trim();
+        busy = true; error = null;
         StateHasChanged();
         try
         {
-            var r = await Assistant.Ask(Store.ClientId, text);
+            var r = await Assistant.Ask(ask, Conversation());
             state = AiSvc.State(Store.ClientId, "assistant");
             if (!r.Ok) { error = r.Message; return; }
-            answer = r;
-            for (var i = 0; i < r.Actions.Count; i++) picked.Add(i);
+            var turn = new Turn { Ask = ask, Answer = r };
+            for (var i = 0; i < r.Actions.Count; i++) turn.Picked.Add(i);
+            turns.Add(turn);
+            text = "";
         }
         finally { busy = false; }
     }
 
-    private void Toggle(int i) { if (!picked.Remove(i)) picked.Add(i); }
+    private static void Toggle(Turn t, int i) { if (!t.Picked.Remove(i)) t.Picked.Add(i); }
 
     private async Task Confirm()
     {
-        if (answer == null) return;
+        if (Current is not { Answer: { } ans } turn) return;
         running = true;
         StateHasChanged();
-        foreach (var i in picked.OrderBy(x => x).ToList())
+        foreach (var i in turn.Picked.Where(i => !turn.Done.ContainsKey(i)).OrderBy(x => x).ToList())
         {
-            done[i] = await Assistant.Run(Store.ClientId, Store.UserId, answer.Actions[i]);
+            turn.Done[i] = await Assistant.Run(ans.Actions[i]);
             StateHasChanged();
         }
-        picked.Clear();
         running = false;
         state = AiSvc.State(Store.ClientId, "assistant");
     }
 
-    private void GoLink() { if (answer?.Link is { } l) { OnClose.InvokeAsync(); Nav.NavigateTo(l); } }
+    private async Task Undo(Turn t, int i)
+    {
+        if (!t.Done.TryGetValue(i, out var r) || r.Undo == null) return;
+        running = true;
+        StateHasChanged();
+        var err = await r.Undo();
+        if (err == null) t.Undone.Add(i); else t.Done[i] = new AiRun(err);
+        running = false;
+    }
+
+    private void GoLink(AiAnswer a) { if (a.Link is { } l) { OnClose.InvokeAsync(); Nav.NavigateTo(l); } }
 }

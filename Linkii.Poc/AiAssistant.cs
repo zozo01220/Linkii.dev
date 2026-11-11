@@ -1,164 +1,782 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Anthropic.Models.Messages;
 
 namespace Linkii.Poc;
 
-/// <summary>Une action proposée par l'assistant, prête à être confirmée. <see cref="Label"/> dit en français ce qui va se passer.</summary>
-public record AiAction(string Op, Guid ScreenId, string Label, string Title = "", string Message = "", string Look = "information", int Seconds = 30, string Command = "");
+/// <summary>Une action proposée par l'assistant, prête à être confirmée. <see cref="Label"/> dit en français ce qui va se passer ; <see cref="A"/> garde ses arguments, déjà contrôlés.</summary>
+public record AiAction(string Op, string Label, Dictionary<string, string> A);
+
+/// <summary>Résultat d'une action confirmée : une erreur, ou une information, et de quoi la défaire quand c'est possible.</summary>
+public record AiRun(string? Error, string? Info = null, Func<Task<string?>>? Undo = null);
 
 /// <summary>Réponse de l'assistant : une phrase, des actions à confirmer, un lien éventuel vers la page concernée.</summary>
 public record AiAnswer(bool Ok, string Say, List<AiAction> Actions, string? Link, string? LinkLabel, string Message);
 
 /// <summary>
-/// Assistant (Pro, piste 5) : la personne écrit ce qu'elle veut (« affiche un message d'accueil sur le hall », « quels écrans sont hors ligne ? ») ; l'IA répond
-/// d'après l'état des écrans et propose des actions de la même API que les clés (message affiché par-dessus la diffusion, retrait du message, redémarrage
-/// du player, extinction ou réveil de l'écran). Rien ne part sans « Confirmer », action par action, avec les droits de la personne. L'assistant ne publie pas
-/// et ne supprime rien. L'IA ne voit que des repères courts (S1, S2…), jamais d'identifiants : un repère inconnu est ignoré.
+/// Assistant (Pro) : la personne écrit ce qu'elle veut savoir ou faire ; l'IA répond d'après l'état de son organisation (écrans, listes, compositions, médias, calendriers,
+/// historique récent) et propose des actions que la personne confirme une à une. Le contexte de la conversation est gardé par la fenêtre et renvoyé à chaque demande.
+/// Tout passe par <see cref="TenantStore"/> et les services de l'application : mêmes droits, mêmes filtres d'aire et de périmètre que les pages. L'IA ne voit que
+/// des repères courts (S1, L1, C1, M1, K1) ; un repère inconnu est ignoré. L'assistant ne publie pas : un changement de liste d'un écran, un bandeau ou un contenu
+/// de liste attend le bouton « Publier » (les calendriers, eux, s'appliquent tout de suite comme sur leur page).
 /// </summary>
-public class AiAssistant(JsonStore root, AiService ai, NoticeService notices, DeviceCommandService commands, ILogger<AiAssistant> log)
+public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCompose compose, AiReview review, NoticeService notices, DeviceCommandService commands,
+    ScreenControl control, Notifier notifier, AppService apps, MediaLibrary library, HistoryLog history, ILogger<AiAssistant> log)
 {
-    private const int MaxScreens = 60, MaxLists = 40, MaxActions = 20, MaxChars = 500;
-    private static readonly string[] Commands = { "restart-player", "screen-off", "wake" };
+    private const int MaxActions = 25, MaxChars = 600;
+    private static readonly string[] Commands = { "restart-player", "screen-off", "wake", "reboot" };
+    private static readonly int[] AlertMinutes = { 1, 5, 10, 15, 30, 60 };
+    private static readonly Regex Token = new(@"\{\{[^}]*\}\}", RegexOptions.Compiled);
+    private const string By = "assistant IA";
 
     private const string System = """
-        Tu es l'assistant de Linkivi, un logiciel d'affichage dynamique. Tu aides une personne à suivre et commander ses écrans, en français, de façon brève.
-        Tu reçois l'état des écrans (repères S1, S2…) et des listes de diffusion (L1, L2…), puis sa demande.
-        Réponds uniquement par un objet JSON, sans commentaire autour :
-        {"say":"ta réponse en une à trois phrases","actions":[ ... ],"open":null}
-        Chaque action est l'une de :
-        - {"op":"show_message","screens":["S1"],"title":"60 caractères au plus","message":"300 caractères au plus","look":"information","seconds":30} : affiche un message par-dessus la diffusion (look : information ou attention ; seconds de 5 à 3600).
-        - {"op":"clear_message","screens":["S1"]} : retire le message affiché.
-        - {"op":"command","screens":["S1"],"command":"restart-player"} : command = restart-player (redémarrer l'application), screen-off (éteindre l'écran) ou wake (réveiller l'écran).
-        « open » : un repère (S1 ou L1) ou « media », « screens », « playlists », « settings » pour proposer d'ouvrir la page concernée, sinon null.
-        Règles : n'agis que sur ce qui est demandé ; si la demande est floue ou vise des écrans que tu ne reconnais pas, pose une question dans « say » et laisse « actions » vide.
-        Tu ne peux pas publier une liste, la modifier, supprimer ou éteindre l'appareil : dans ce cas, explique-le et propose « open ». Un écran hors ligne ne peut pas recevoir de message : dis-le.
-        N'invente aucun écran ni aucune liste. N'écris dans un message que ce que la personne demande.
+        Tu es l'assistant de Linkivi, un logiciel d'affichage dynamique. Tu aides une personne à suivre et à gérer ses écrans, ses listes de diffusion, ses compositions et ses images, en français, de façon brève.
+        Tu reçois l'état de son organisation avec des repères (S1 écrans, L1 listes, C1 compositions, M1 images, K1 calendriers), le début de la conversation, puis sa demande.
+        Réponds uniquement par un objet JSON, sans commentaire autour : {"say":"réponse en une à trois phrases","actions":[ ... ],"open":null}
+        Chaque action est un objet avec « op » et ses champs. Un champ « screens » est une liste de repères S. Opérations :
+        ÉCRANS
+        - show_message {screens,title(60),message(300),look:information|attention,seconds:5-3600} · clear_message {screens}
+        - command {screens,command:restart-player|screen-off|wake|reboot}
+        - screen_pause {screens,minutes:1-1440} · screen_resume {screens}
+        - screen_rename {screen,name} · screen_set_list {screens,list:"L1" ou null} (change la liste par défaut de l'écran ; elle ne passe à l'écran qu'à la publication, que la personne fait elle-même)
+        - screen_param {screen,name,value} (variable existante de l'écran) · band_text {screens,band:top|bottom,text(160)} · band_off {screens,band}
+        LISTES (brouillon seulement ; « item » est le numéro d'un contenu dans la liste, depuis 1)
+        - list_create {name} · list_rename {list,name} · list_duplicate {list,name} · list_review {list} (relit la liste : dates passées, textes oubliés, fautes)
+        - list_add {list,content:"C1" ou "M1",seconds} · list_remove {list,item} · list_move {list,item,to} · list_duration {list,item (ou "all"),seconds} · list_transition {list,item (ou "all"),transition:cut|fade|push-left|push-right|push-up|push-down|zoom} · list_toggle {list,item,on:true|false}
+        IMAGES ET COMPOSITIONS
+        - media_rename {media,name} · media_describe {media,description,tags:[...]} · media_analyze {media} (l'IA décrit l'image)
+        - composition_create {sentence,portrait:false,list:"L1" ou null} (crée une composition depuis une phrase) · text_replace {composition,find,replace} (remplace du texte exact dans une composition)
+        - text_fix {target:"C1" ou "L1",mode:correct|improve|formal|warm|short} (corrige ou reformule les textes d'une composition, ou de toutes les compositions d'une liste)
+        PLANNING ET RÉGLAGES
+        - calendar_create {name,list} · calendar_event {calendar,kind:play|off,list,days:[1..7 lundi=1],from:"HH:mm",to:"HH:mm",always:false} · calendar_assign {screens,calendar:"K1"}
+        - alert_delay {minutes:1|5|10|15|30|60} (délai avant l'alerte « écran hors ligne »)
+        « open » : un repère (S1, L1, C1) ou « media », « screens », « playlists », « programmations », « settings », sinon null.
+        Règles : n'agis que sur ce qui est demandé ; garde en tête la conversation (« sur celui-là aussi » parle de ce dont on vient de parler). Si la demande est floue ou vise ce que tu ne reconnais pas, pose une question dans « say » et laisse « actions » vide.
+        Tu ne publies jamais, tu ne supprimes aucun écran, liste, composition, média ni membre, tu n'éteins pas l'appareil : explique-le et propose « open ». Un écran hors ligne ne reçoit pas de message ni de commande : dis-le.
+        N'invente aucun repère. N'écris dans un message ou un texte que ce que la personne demande. Pour répondre à une question (état, historique, recherche d'image), « actions » reste vide.
         """;
 
-    private record Ctx(Dictionary<string, Guid> Screens, Dictionary<string, (Guid Id, string Name)> Lists, Dictionary<Guid, string> Names, string Text);
+    // ---------- Contexte ----------
 
-    private Ctx Context(Guid clientId) => root.Read(d =>
+    private record Ctx(Dictionary<string, Guid> Screens, Dictionary<string, Guid> Lists, Dictionary<string, List<Guid>> Items, Dictionary<string, Guid> Comps,
+        Dictionary<string, Guid> Media, Dictionary<string, Guid> Cals, Dictionary<Guid, string> Names, string Text);
+
+    private Ctx Context(string request)
     {
+        var terms = AiMedia.Terms(request);
+        var norm = AiMedia.Norm(request);
         var now = DateTime.UtcNow;
-        var t = d.Clients.First(c => c.Id == clientId);
-        var screens = new Dictionary<string, Guid>(); var names = new Dictionary<Guid, string>(); var lists = new Dictionary<string, (Guid, string)>();
-        var sb = new System.Text.StringBuilder("Écrans :\n");
-        var i = 0;
-        foreach (var s in d.Screens.Where(s => s.ClientId == clientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Take(MaxScreens))
+        var cid = store.ClientId;
+        var past = history.Read(cid, now.AddDays(-3)).Where(e => e.Channel != History.Diag).Take(8).ToList();
+        return store.Read(d =>
         {
-            var v = ScreenEvents.View(d, t, s, now);
-            var key = "S" + ++i;
-            screens[key] = s.Id; names[s.Id] = s.Name;
-            sb.Append($"{key} · {s.Name} · {(v.Online ? (v.Asleep ? "en ligne, en veille" : "en ligne") : "hors ligne")} · liste : {v.Playlist?.Name ?? "aucune"} · aire : {v.Area?.Name ?? "-"}\n");
-        }
-        if (i == 0) sb.Append("(aucun écran)\n");
-        sb.Append("\nListes de diffusion :\n");
-        var j = 0;
-        foreach (var p in d.Playlists.Where(p => p.ClientId == clientId).OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).Take(MaxLists))
-        {
-            var key = "L" + ++j;
-            lists[key] = (p.Id, p.Name);
-            sb.Append($"{key} · {p.Name} · {d.Screens.Count(s => s.PlaylistId == p.Id)} écran(s)\n");
-        }
-        if (j == 0) sb.Append("(aucune liste)\n");
-        return new Ctx(screens, lists, names, sb.ToString());
-    });
+            var t = d.Tenant;
+            var screens = new Dictionary<string, Guid>(); var lists = new Dictionary<string, Guid>(); var items = new Dictionary<string, List<Guid>>();
+            var comps = new Dictionary<string, Guid>(); var media = new Dictionary<string, Guid>(); var cals = new Dictionary<string, Guid>(); var names = new Dictionary<Guid, string>();
+            var sb = new StringBuilder("Écrans :\n");
+            var i = 0;
+            foreach (var s in d.AllScreens.Where(s => s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Take(60))
+            {
+                var v = ScreenEvents.View(d.Root, t, s, now);
+                var key = "S" + ++i; screens[key] = s.Id; names[s.Id] = s.Name;
+                var pars = s.Params.Count > 0 ? " · variables : " + string.Join(", ", s.Params.Take(5).Select(p => $"{p.Name}={p.Value}")) : "";
+                sb.Append($"{key} · {s.Name} · {(v.Online ? (v.Asleep ? "en ligne, en veille" : "en ligne") : "hors ligne")}{(v.Paused ? ", en pause" : "")} · liste : {v.Playlist?.Name ?? "aucune"} · aire : {v.Area?.Name ?? "-"}{pars}\n");
+            }
+            if (i == 0) sb.Append("(aucun écran)\n");
 
-    public async Task<AiAnswer> Ask(Guid clientId, string request, CancellationToken ct = default)
+            var mediaById = d.AllMedia.ToDictionary(m => m.Id, m => m);
+            sb.Append("\nListes de diffusion (contenus numérotés) :\n");
+            var j = 0;
+            foreach (var p in d.Playlists.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).Take(40))
+            {
+                var key = "L" + ++j; lists[key] = p.Id; names[p.Id] = p.Name; items[key] = p.Draft.Select(x => x.Id).ToList();
+                var content = string.Join(" ; ", p.Draft.Take(12).Select((x, n) => $"{n + 1}) {(mediaById.TryGetValue(x.MediaId, out var m) ? m.Name : "?")}{(x.Off ? " (désactivé)" : "")} {x.DurationSec} s"));
+                sb.Append($"{key} · {p.Name} · {d.AllScreens.Count(s => s.PlaylistId == p.Id)} écran(s) · {(p.Draft.Count == 0 ? "vide" : content + (p.Draft.Count > 12 ? $" … ({p.Draft.Count} au total)" : ""))}\n");
+            }
+            if (j == 0) sb.Append("(aucune liste)\n");
+
+            sb.Append("\nCompositions :\n");
+            var k = 0;
+            var wanted = new HashSet<Guid>();
+            foreach (var l in d.Playlists.Where(p => norm.Contains(AiMedia.Norm(p.Name)) && p.Name.Length > 2).Take(3))
+                foreach (var it in l.Draft) if (mediaById.TryGetValue(it.MediaId, out var mm) && mm.AppId == Compositions.AppId) wanted.Add(mm.Id);
+            foreach (var c in d.Media.Where(m => m.AppId == Compositions.AppId).OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase).Take(40))
+            {
+                var key = "C" + ++k; comps[key] = c.Id; names[c.Id] = c.Name;
+                var texts = wanted.Contains(c.Id) || c.Name.Length > 2 && norm.Contains(AiMedia.Norm(c.Name)) ? " · textes : " + string.Join(" | ", TextsOf(c.Settings.GetValueOrDefault("doc")).Take(10).Select(x => "« " + Cut(x, 90) + " »")) : "";
+                sb.Append($"{key} · {c.Name}{texts}\n");
+            }
+            if (k == 0) sb.Append("(aucune composition)\n");
+
+            sb.Append("\nImages (celles qui répondent à la demande, puis les plus récentes) :\n");
+            var pick = new List<MediaItem>();
+            if (terms.Count > 0) pick.AddRange(d.Media.Where(m => m.Type == "image" && AiMedia.Matches(m, terms, out _)).Take(12));
+            pick.AddRange(d.Media.Where(m => m.Type == "image").OrderByDescending(m => m.AddedUtc).Take(12));
+            var n2 = 0;
+            foreach (var m in pick.DistinctBy(m => m.Id).Take(24))
+            {
+                var key = "M" + ++n2; media[key] = m.Id; names[m.Id] = m.Name;
+                sb.Append($"{key} · {m.Name}{(m.AiDesc is { Length: > 0 } ds ? " · " + Cut(ds, 110) : "")}{(m.AiTags.Count > 0 ? " · mots-clés : " + string.Join(", ", m.AiTags.Take(6)) : "")}\n");
+            }
+            if (n2 == 0) sb.Append("(aucune image)\n");
+
+            sb.Append("\nCalendriers de programmation :\n");
+            var q = 0;
+            foreach (var c in d.Calendars.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).Take(20))
+            {
+                var key = "K" + ++q; cals[key] = c.Id; names[c.Id] = c.Name;
+                sb.Append($"{key} · {c.Name} · liste par défaut : {d.Playlists.FirstOrDefault(p => p.Id == c.DefaultPlaylistId)?.Name ?? "?"} · {c.Events.Count} événement(s)\n");
+            }
+            if (q == 0) sb.Append("(aucun calendrier)\n");
+
+            sb.Append($"\nAlerte « écran hors ligne » après {t.AlertOfflineMinutes} minute(s).\n");
+            if (past.Count > 0) sb.Append("\nHistorique récent :\n" + string.Join("\n", past.Select(e => $"{e.AtUtc.ToLocalTime():dd.MM HH:mm} · {e.Title}{(e.Actor is { Length: > 0 } a ? " (" + a + ")" : "")}")) + "\n");
+            return new Ctx(screens, lists, items, comps, media, cals, names, sb.ToString());
+        });
+    }
+
+    private static List<string> TextsOf(string? doc)
+    {
+        var list = new List<string>();
+        try { if (JsonNode.Parse(doc ?? "") is JsonObject o && o["els"] is JsonArray els) foreach (var e in els.OfType<JsonObject>()) if (Str(e, "type") == "text" && Str(e, "text") is { Length: > 0 } t) list.Add(t.Replace("\n", " ")); }
+        catch (JsonException) { }
+        return list;
+    }
+
+    // ---------- Demande ----------
+
+    public async Task<AiAnswer> Ask(string request, string conversation, CancellationToken ct = default)
     {
         request = (request ?? "").Trim();
-        if (request.Length < 2) return new AiAnswer(false, "", new(), null, null, "Écrivez ce que vous voulez faire ou savoir.");
-        if (request.Length > MaxChars) return new AiAnswer(false, "", new(), null, null, "Cette demande est trop longue : une ou deux phrases suffisent.");
-        var ctx = Context(clientId);
-        var r = await ai.Complete(clientId, "assistant", System, new UserMessageParam { Content = ctx.Text + "\nDemande : " + request }, 1200, ct);
-        if (!r.Ok) return new AiAnswer(false, "", new(), null, null, r.Message);
+        if (request.Length < 2) return Fail("Écrivez ce que vous voulez faire ou savoir.");
+        if (request.Length > MaxChars) return Fail("Cette demande est trop longue : une ou deux phrases suffisent.");
+        var ctx = Context(request + " " + conversation);
+        var prompt = ctx.Text + (conversation.Length > 0 ? "\nConversation jusqu'ici :\n" + conversation + "\n" : "") + "\nNouvelle demande : " + request;
+        var r = await ai.Complete(store.ClientId, "assistant", System, new UserMessageParam { Content = prompt }, 2500, ct);
+        if (!r.Ok) return Fail(r.Message);
         var a = r.Text.IndexOf('{'); var b = r.Text.LastIndexOf('}');
-        if (a < 0 || b <= a) return new AiAnswer(false, "", new(), null, null, "L'assistant n'a pas compris cette demande. Reformulez-la.");
+        if (a < 0 || b <= a) return Fail("L'assistant n'a pas compris cette demande. Reformulez-la.");
         try
         {
-            if (JsonNode.Parse(r.Text[a..(b + 1)]) is not JsonObject o) return new AiAnswer(false, "", new(), null, null, "L'assistant n'a pas compris cette demande. Reformulez-la.");
+            if (JsonNode.Parse(r.Text[a..(b + 1)]) is not JsonObject o) return Fail("L'assistant n'a pas compris cette demande. Reformulez-la.");
             var say = (Str(o, "say") ?? "").Trim();
             var actions = new List<AiAction>();
             foreach (var x in (o["actions"] as JsonArray ?? new()).OfType<JsonObject>())
-            {
-                foreach (var key in (x["screens"] as JsonArray ?? new()).Select(k => k?.GetValue<string>() ?? "").Distinct())
-                {
-                    if (actions.Count >= MaxActions) break;
-                    if (!ctx.Screens.TryGetValue(key, out var sid)) continue;
-                    if (Build(x, sid, ctx.Names[sid]) is { } act) actions.Add(act);
-                }
-            }
+                foreach (var act in Build(x, ctx)) if (actions.Count < MaxActions) actions.Add(act);
             var (link, label) = Link(Str(o, "open"), ctx);
             if (say.Length == 0) say = actions.Count > 0 ? "Voici ce que je propose." : "Je n'ai rien à proposer pour cette demande.";
-            return new AiAnswer(true, say.Length > 600 ? say[..600] : say, actions, link, label, "");
+            return new AiAnswer(true, say.Length > 700 ? say[..700] : say, actions, link, label, "");
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException)
         {
             log.LogInformation(e, "Réponse illisible de l'assistant.");
-            return new AiAnswer(false, "", new(), null, null, "L'assistant n'a pas compris cette demande. Reformulez-la.");
+            return Fail("L'assistant n'a pas compris cette demande. Reformulez-la.");
         }
     }
 
-    private static AiAction? Build(JsonObject x, Guid screen, string name)
+    private static AiAnswer Fail(string msg) => new(false, "", new(), null, null, msg);
+
+    private static (string?, string?) Link(string? open, Ctx ctx)
     {
-        switch (Str(x, "op"))
+        if (string.IsNullOrEmpty(open)) return (null, null);
+        if (ctx.Lists.TryGetValue(open, out var l)) return ("/playlists/" + l, "Ouvrir la liste « " + ctx.Names[l] + " »");
+        if (ctx.Comps.TryGetValue(open, out var c)) return ("/compositions/" + c, "Ouvrir la composition « " + ctx.Names[c] + " »");
+        if (ctx.Screens.ContainsKey(open)) return ("/", "Ouvrir la page Écrans");
+        return open switch
+        {
+            "media" => ("/media", "Ouvrir la médiathèque"), "screens" => ("/", "Ouvrir la page Écrans"), "playlists" => ("/playlists", "Ouvrir les listes de diffusion"),
+            "programmations" => ("/programmations", "Ouvrir les programmations"), "settings" => ("/settings", "Ouvrir les réglages"), _ => (null, null),
+        };
+    }
+
+    // ---------- Construction des actions (arguments contrôlés, libellés) ----------
+
+    private static IEnumerable<AiAction> Build(JsonObject x, Ctx c)
+    {
+        var op = Str(x, "op") ?? "";
+        IEnumerable<Guid> Screens() => (x["screens"] as JsonArray ?? (x["screen"] is JsonNode sn ? new JsonArray(sn.DeepClone()) : new()))
+            .Select(k => k is JsonValue v && v.TryGetValue<string>(out var s) && c.Screens.TryGetValue(s, out var g) ? g : Guid.Empty).Where(g => g != Guid.Empty).Distinct();
+        Guid? Ref(string field, Dictionary<string, Guid> map) => Str(x, field) is { } k && map.TryGetValue(k, out var g) ? g : null;
+        Guid? List() => Ref("list", c.Lists);
+        int? Item(Guid list)
+        {
+            var key = c.Lists.First(kv => kv.Value == list).Key;
+            return x["item"] is JsonValue v && v.TryGetValue<double>(out var n) && n >= 1 && n <= c.Items[key].Count ? (int)n : null;
+        }
+        string Num(string f, int dflt, int min, int max) => (x[f] is JsonValue v && v.TryGetValue<double>(out var d) ? (int)Math.Clamp(Math.Round(d), min, max) : dflt).ToString();
+        AiAction Act(string label, params (string K, string V)[] args) => new(op, label, args.ToDictionary(a => a.K, a => a.V));
+        string N(Guid g) => c.Names.GetValueOrDefault(g, "?");
+
+        switch (op)
         {
             case "show_message":
+            {
                 var title = Cut(Str(x, "title"), 60); var msg = Cut(Str(x, "message"), 300);
-                if (title.Length == 0 && msg.Length == 0) return null;
+                if (title.Length == 0 && msg.Length == 0) yield break;
                 var look = Str(x, "look") == "attention" ? "attention" : "information";
-                var sec = x["seconds"] is JsonValue v && v.TryGetValue<double>(out var dd) ? (int)Math.Clamp(Math.Round(dd), 5, 3600) : 30;
-                var shown = title.Length > 0 ? title : msg;
-                return new AiAction("show_message", screen, $"Afficher « {Cut(shown, 50)} » sur {name} ({Duration(sec)})", title, msg, look, sec);
+                var sec = int.Parse(Num("seconds", 30, 5, 3600));
+                foreach (var s in Screens()) yield return Act($"Afficher « {Cut(title.Length > 0 ? title : msg, 50)} » sur {N(s)} ({Duration(sec)})", ("s", s.ToString()), ("title", title), ("message", msg), ("look", look), ("seconds", sec.ToString()));
+                break;
+            }
             case "clear_message":
-                return new AiAction("clear_message", screen, $"Retirer le message affiché sur {name}");
+                foreach (var s in Screens()) yield return Act($"Retirer le message affiché sur {N(s)}", ("s", s.ToString()));
+                break;
             case "command":
-                var c = (Str(x, "command") ?? "").Trim().ToLowerInvariant();
-                if (!Commands.Contains(c)) return null;
-                return new AiAction("command", screen, c switch { "restart-player" => $"Redémarrer l'application de {name}", "screen-off" => $"Éteindre l'écran de {name}", _ => $"Réveiller l'écran de {name}" }, Command: c);
-            default: return null;
+            {
+                var cmd = (Str(x, "command") ?? "").Trim().ToLowerInvariant();
+                if (!Commands.Contains(cmd)) yield break;
+                foreach (var s in Screens()) yield return Act(cmd switch { "restart-player" => $"Redémarrer l'application de {N(s)}", "screen-off" => $"Éteindre l'écran de {N(s)}", "reboot" => $"Redémarrer l'appareil de {N(s)}", _ => $"Réveiller l'écran de {N(s)}" }, ("s", s.ToString()), ("command", cmd));
+                break;
+            }
+            case "screen_pause":
+            {
+                var min = int.Parse(Num("minutes", 30, 1, 1440));
+                foreach (var s in Screens()) yield return Act($"Mettre {N(s)} en pause ({(min < 60 ? min + " min" : min % 60 == 0 ? min / 60 + " h" : min / 60 + " h " + min % 60 + " min")})", ("s", s.ToString()), ("minutes", min.ToString()));
+                break;
+            }
+            case "screen_resume":
+                foreach (var s in Screens()) yield return Act($"Reprendre la diffusion sur {N(s)}", ("s", s.ToString()));
+                break;
+            case "screen_rename":
+            {
+                var name = Cut(Str(x, "name"), 60);
+                if (name.Length == 0) yield break;
+                foreach (var s in Screens().Take(1)) yield return Act($"Renommer {N(s)} en « {name} »", ("s", s.ToString()), ("name", name));
+                break;
+            }
+            case "screen_set_list":
+            {
+                var l = List();
+                if (l == null && Str(x, "list") != null && x["list"] is JsonValue lv && lv.TryGetValue<string>(out var ls) && ls != "null") yield break;   // repère inconnu
+                foreach (var s in Screens()) yield return Act(l == null ? $"Retirer la liste par défaut de {N(s)}" : $"Mettre la liste « {N(l.Value)} » sur {N(s)} (à publier ensuite)", ("s", s.ToString()), ("list", l?.ToString() ?? ""));
+                break;
+            }
+            case "screen_param":
+            {
+                var name = Cut(Str(x, "name"), 60); var val = Cut(Str(x, "value"), 200);
+                if (name.Length == 0) yield break;
+                foreach (var s in Screens().Take(1)) yield return Act($"Régler « {name} » sur « {val} » pour {N(s)}", ("s", s.ToString()), ("name", name), ("value", val));
+                break;
+            }
+            case "band_text":
+            {
+                var text = Cut(Str(x, "text"), 160); var band = Str(x, "band") == "bottom" ? "bottom" : "top";
+                if (text.Length == 0) yield break;
+                foreach (var s in Screens()) yield return Act($"Bandeau {(band == "top" ? "du haut" : "du bas")} de {N(s)} : « {Cut(text, 50)} » (à publier ensuite)", ("s", s.ToString()), ("band", band), ("text", text));
+                break;
+            }
+            case "band_off":
+            {
+                var band = Str(x, "band") == "bottom" ? "bottom" : "top";
+                foreach (var s in Screens()) yield return Act($"Retirer le bandeau {(band == "top" ? "du haut" : "du bas")} de {N(s)} (à publier ensuite)", ("s", s.ToString()), ("band", band));
+                break;
+            }
+            case "list_create":
+            {
+                var name = Cut(Str(x, "name"), 80);
+                if (name.Length > 0) yield return Act($"Créer la liste « {name} »", ("name", name));
+                break;
+            }
+            case "list_rename":
+            case "list_duplicate":
+            {
+                var name = Cut(Str(x, "name"), 80);
+                if (List() is { } l && name.Length > 0) yield return Act(op == "list_rename" ? $"Renommer la liste « {N(l)} » en « {name} »" : $"Dupliquer la liste « {N(l)} » sous le nom « {name} »", ("l", l.ToString()), ("name", name));
+                break;
+            }
+            case "list_review":
+                if (List() is { } rl) yield return Act($"Relire la liste « {N(rl)} » (dates passées, textes oubliés, fautes)", ("l", rl.ToString()));
+                break;
+            case "list_add":
+            {
+                if (List() is not { } l) yield break;
+                var content = Ref("content", c.Comps) ?? Ref("content", c.Media);
+                if (content == null) yield break;
+                var sec = int.Parse(Num("seconds", 0, 0, 3600));
+                yield return Act($"Ajouter « {N(content.Value)} » à la liste « {N(l)} »{(sec > 0 ? $" ({sec} s)" : "")}", ("l", l.ToString()), ("content", content.Value.ToString()), ("seconds", sec.ToString()));
+                break;
+            }
+            case "list_remove":
+            case "list_toggle":
+            case "list_move":
+            {
+                if (List() is not { } l || Item(l) is not { } n) yield break;
+                var id = c.Items[c.Lists.First(kv => kv.Value == l).Key][n - 1];
+                if (op == "list_remove") yield return Act($"Retirer le contenu n° {n} de la liste « {N(l)} » (le fichier reste dans la médiathèque)", ("l", l.ToString()), ("item", id.ToString()));
+                else if (op == "list_toggle")
+                {
+                    var on = x["on"] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : true;
+                    yield return Act($"{(on ? "Activer" : "Désactiver")} le contenu n° {n} de la liste « {N(l)} »", ("l", l.ToString()), ("item", id.ToString()), ("on", on.ToString()));
+                }
+                else
+                {
+                    var count = c.Items[c.Lists.First(kv => kv.Value == l).Key].Count;
+                    var to = int.Parse(Num("to", n, 1, count));
+                    if (to != n) yield return Act($"Déplacer le contenu n° {n} en position {to} dans « {N(l)} »", ("l", l.ToString()), ("item", id.ToString()), ("to", to.ToString()));
+                }
+                break;
+            }
+            case "list_duration":
+            case "list_transition":
+            {
+                if (List() is not { } l) yield break;
+                var key = c.Lists.First(kv => kv.Value == l).Key;
+                var all = Str(x, "item") == "all" || x["item"] == null;
+                var ids = all ? c.Items[key] : Item(l) is { } n ? new List<Guid> { c.Items[key][n - 1] } : new();
+                if (ids.Count == 0) yield break;
+                var where = all ? $"de tous les contenus de « {N(l)} »" : $"du contenu n° {Item(l)} de « {N(l)} »";
+                if (op == "list_duration")
+                {
+                    var sec = int.Parse(Num("seconds", 8, 1, 3600));
+                    yield return Act($"Durée {where} : {Duration(sec)}", ("l", l.ToString()), ("items", string.Join(",", ids)), ("seconds", sec.ToString()));
+                }
+                else
+                {
+                    var tr = Str(x, "transition") ?? "";
+                    if (!Transitions.All.Any(t => t.Id == tr)) yield break;
+                    yield return Act($"Transition {where} : {Transitions.Label(tr).ToLowerInvariant()}", ("l", l.ToString()), ("items", string.Join(",", ids)), ("transition", tr));
+                }
+                break;
+            }
+            case "media_rename":
+                if (Ref("media", c.Media) is { } m1 && Cut(Str(x, "name"), 120) is { Length: > 0 } nn) yield return Act($"Renommer l'image « {N(m1)} » en « {nn} »", ("m", m1.ToString()), ("name", nn));
+                break;
+            case "media_describe":
+            {
+                if (Ref("media", c.Media) is not { } m) yield break;
+                var desc = Cut(Str(x, "description"), 400);
+                var tags = (x["tags"] as JsonArray ?? new()).Select(t => Cut(t is JsonValue v && v.TryGetValue<string>(out var s) ? s : "", 40)).Where(s => s.Length > 0).Distinct().Take(12).ToList();
+                if (desc.Length == 0 && tags.Count == 0) yield break;
+                yield return Act($"Corriger la description de l'image « {N(m)} »", ("m", m.ToString()), ("description", desc), ("tags", string.Join("\n", tags)));
+                break;
+            }
+            case "media_analyze":
+                if (Ref("media", c.Media) is { } m2) yield return Act($"Faire décrire l'image « {N(m2)} » par l'IA", ("m", m2.ToString()));
+                break;
+            case "composition_create":
+            {
+                var sentence = Cut(Str(x, "sentence"), AiCompose.MaxSentence);
+                if (sentence.Length < 4) yield break;
+                var portrait = x["portrait"] is JsonValue v && v.TryGetValue<bool>(out var pb) && pb;
+                var l = List();
+                yield return Act($"Créer une composition « {Cut(sentence, 60)} »{(portrait ? " (portrait)" : "")}{(l != null ? $" et l'ajouter à « {N(l.Value)} »" : "")}", ("sentence", sentence), ("portrait", portrait.ToString()), ("l", l?.ToString() ?? ""));
+                break;
+            }
+            case "text_replace":
+            {
+                var find = Str(x, "find") ?? ""; var rep = Str(x, "replace") ?? "";
+                if (Ref("composition", c.Comps) is { } comp && find.Length > 0 && find.Length <= 300 && rep.Length <= 300)
+                    yield return Act($"Dans « {N(comp)} » : remplacer « {Cut(find, 60)} » par « {Cut(rep, 60)} »", ("c", comp.ToString()), ("find", find), ("replace", rep));
+                break;
+            }
+            case "text_fix":
+            {
+                var mode = Str(x, "mode") is "improve" or "formal" or "warm" or "short" ? Str(x, "mode")! : "correct";
+                var what = Str(x, "target") is { } t && c.Comps.TryGetValue(t, out var cg) ? ("c", cg, $"de la composition « {N(cg)} »") : Str(x, "target") is { } t2 && c.Lists.TryGetValue(t2, out var lg) ? ("l", lg, $"des compositions de la liste « {N(lg)} »") : default;
+                if (what.Item2 == Guid.Empty) yield break;
+                var verb = mode switch { "improve" => "Améliorer", "formal" => "Rendre plus formels", "warm" => "Rendre plus chaleureux", "short" => "Raccourcir", _ => "Corriger" };
+                yield return Act($"{verb} les textes {what.Item3}", ("kind", what.Item1), ("id", what.Item2.ToString()), ("mode", mode));
+                break;
+            }
+            case "calendar_create":
+            {
+                var name = Cut(Str(x, "name"), 80);
+                if (name.Length > 0 && List() is { } l) yield return Act($"Créer le calendrier « {name} » (liste par défaut : « {N(l)} »)", ("name", name), ("l", l.ToString()));
+                break;
+            }
+            case "calendar_event":
+            {
+                if (Ref("calendar", c.Cals) is not { } cal) yield break;
+                var kind = Str(x, "kind") == "off" ? "off" : "play";
+                var l = List();
+                if (kind == "play" && l == null) yield break;
+                var always = x["always"] is JsonValue av && av.TryGetValue<bool>(out var ab) && ab;
+                var days = (x["days"] as JsonArray ?? new()).Select(d => d is JsonValue v && v.TryGetValue<double>(out var n) ? (int)n : 0).Where(n => n is >= 1 and <= 7).Distinct().ToList();
+                if (days.Count == 0) days = Enumerable.Range(1, 7).ToList();
+                var from = Str(x, "from") ?? ""; var to = Str(x, "to") ?? "";
+                if (!always && (!Planning.TryHm(from, out _) || !Planning.TryHm(to, out _))) yield break;
+                var mask = days.Sum(d => 1 << (d - 1));
+                var when = always ? "toute la journée" : $"de {from} à {to}";
+                yield return Act($"Calendrier « {N(cal)} » : {(kind == "off" ? "éteindre l'écran" : $"diffuser « {N(l!.Value)} »")} {Planning.DaysText(mask)} {when} (s'applique tout de suite)", ("k", cal.ToString()), ("kind", kind), ("l", l?.ToString() ?? ""), ("days", mask.ToString()), ("from", from), ("to", to), ("always", always.ToString()));
+                break;
+            }
+            case "calendar_assign":
+            {
+                if (Ref("calendar", c.Cals) is not { } cal) yield break;
+                foreach (var s in Screens()) yield return Act($"Assigner le calendrier « {N(cal)} » à {N(s)} (s'applique tout de suite)", ("s", s.ToString()), ("k", cal.ToString()));
+                break;
+            }
+            case "alert_delay":
+            {
+                var min = int.Parse(Num("minutes", 10, 1, 60));
+                if (AlertMinutes.Contains(min)) yield return Act($"Alerter après {min} minute{(min > 1 ? "s" : "")} d'écran hors ligne", ("minutes", min.ToString()));
+                break;
+            }
         }
     }
 
     private static string Duration(int s) => s < 60 ? s + " s" : s % 60 == 0 ? s / 60 + " min" : s / 60 + " min " + s % 60 + " s";
 
-    private static (string?, string?) Link(string? open, Ctx ctx)
-    {
-        if (string.IsNullOrEmpty(open)) return (null, null);
-        if (ctx.Lists.TryGetValue(open, out var l)) return ("/playlists/" + l.Id, "Ouvrir la liste « " + l.Name + " »");
-        if (ctx.Screens.ContainsKey(open)) return ("/", "Ouvrir la page Écrans");
-        return open switch
-        {
-            "media" => ("/media", "Ouvrir la médiathèque"),
-            "screens" => ("/", "Ouvrir la page Écrans"),
-            "playlists" => ("/playlists", "Ouvrir les listes de diffusion"),
-            "settings" => ("/settings", "Ouvrir les réglages"),
-            _ => (null, null),
-        };
-    }
+    // ---------- Exécution (après « Confirmer ») ----------
 
-    /// <summary>Exécute une action confirmée, avec les droits de la personne. Rend null si tout va bien, sinon le message à montrer.</summary>
-    public async Task<string?> Run(Guid clientId, Guid? userId, AiAction a)
+    private bool Can(string domain) => store.Read(d => d.Access.CanWrite(domain));
+    private bool SeesScreen(Guid id) => store.Read(d => d.Access.CanWrite(LevelPages.Screens) && d.AllScreens.Any(s => s.Id == id));
+    private static Guid G(AiAction a, string k) => Guid.TryParse(a.A.GetValueOrDefault(k), out var g) ? g : Guid.Empty;
+    private const string NoRight = "Vous n'avez pas les droits pour cette action.";
+
+    public async Task<AiRun> Run(AiAction a, CancellationToken ct = default)
     {
-        const string by = "assistant IA";
+        var cid = store.ClientId; var uid = store.UserId;
         try
         {
             switch (a.Op)
             {
                 case "show_message":
-                    return (await notices.Show(clientId, userId, a.ScreenId, a.Title, a.Message, a.Look, a.Seconds, false, by)).Error;
+                    return new((await notices.Show(cid, uid, G(a, "s"), a.A["title"], a.A["message"], a.A["look"], int.Parse(a.A["seconds"]), false, By)).Error);
                 case "clear_message":
-                    return (await notices.Clear(clientId, userId, a.ScreenId, by)).Error;
+                    return new((await notices.Clear(cid, uid, G(a, "s"), By)).Error);
                 case "command":
-                    if (!Commands.Contains(a.Command)) return "Commande inconnue.";
-                    var res = await commands.Run(clientId, userId, a.ScreenId, a.Command, by);
-                    return res.NotFound ? "Écran introuvable." : res.Ok ? null : res.Error;
-                default: return "Action inconnue.";
+                {
+                    var res = await commands.Run(cid, uid, G(a, "s"), a.A["command"], By);
+                    return new(res.NotFound ? "Écran introuvable." : res.Ok ? null : res.Error);
+                }
+                case "screen_pause":
+                    if (!SeesScreen(G(a, "s"))) return new(NoRight);
+                    return new((await control.Send(cid, G(a, "s"), ScreenCommand.Pause, By, int.Parse(a.A["minutes"]))).Error);
+                case "screen_resume":
+                    if (!SeesScreen(G(a, "s"))) return new(NoRight);
+                    return new((await control.Send(cid, G(a, "s"), ScreenCommand.Resume, By)).Error);
+                case "screen_rename": return ScreenSet(a, (s, v) => { var old = s.Name; s.Name = v; return old; }, a.A["name"], "Écran renommé.");
+                case "screen_set_list":
+                {
+                    var lid = G(a, "list");
+                    if (lid != Guid.Empty && !store.Read(d => d.Playlists.Any(p => p.Id == lid))) return new("Liste introuvable.");
+                    var r = ScreenSet(a, (s, v) => { var old = s.PlaylistId?.ToString() ?? ""; s.PlaylistId = Guid.TryParse(v, out var g) ? g : null; return old; }, a.A["list"], "Liste choisie : publiez l'écran pour l'appliquer.");
+                    return r;
+                }
+                case "screen_param":
+                {
+                    var name = a.A["name"];
+                    if (!store.Read(d => d.AllScreens.FirstOrDefault(s => s.Id == G(a, "s"))?.Params.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) == true)) return new("Cette variable n'existe pas sur l'écran.");
+                    return ScreenSet(a, (s, v) => { var p = s.Params.First(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)); var old = p.Value; p.Value = v; return old; }, a.A["value"], "Variable modifiée.");
+                }
+                case "band_text": case "band_off": return BandOp(a);
+                case "list_create":
+                {
+                    if (!Can(LevelPages.Playlists)) return new(NoRight);
+                    var p = new Playlist { Name = a.A["name"], UpdatedAt = DateTime.UtcNow };
+                    store.Write(d => d.Playlists.Add(p));
+                    return new(null, "Liste créée.");
+                }
+                case "list_rename": return ListEdit(a, (pl, d) => { pl.Name = a.A["name"]; pl.UpdatedAt = DateTime.UtcNow; return null; }, "Liste renommée.");
+                case "list_duplicate":
+                {
+                    if (!Can(LevelPages.Playlists)) return new(NoRight);
+                    var lid = G(a, "l");
+                    var ok = store.Write(d =>
+                    {
+                        if (d.Playlists.FirstOrDefault(p => p.Id == lid) is not { } src) return false;
+                        var copy = new Playlist { Name = a.A["name"], UpdatedAt = DateTime.UtcNow, DraftChanged = true, Draft = src.Draft.Select(i => new PlaylistItem
+                        {
+                            MediaId = i.MediaId, DurationSec = i.DurationSec, DurationMode = i.DurationMode, Placement = i.Placement, Off = i.Off, StartsAt = i.StartsAt, EndsAt = i.EndsAt,
+                            Transition = i.Transition, TransitionMs = i.TransitionMs,
+                        }).ToList() };
+                        d.Playlists.Add(copy);
+                        return true;
+                    });
+                    return new(ok ? null : "Liste introuvable.", ok ? "Liste dupliquée." : null);
+                }
+                case "list_review":
+                {
+                    var r = await review.Run(cid, G(a, "l"), ct);
+                    if (!r.Ok) return new(r.Message);
+                    return new(null, r.Findings.Count == 0 ? "Rien à signaler." : r.Findings.Count + " remarque(s) : " + string.Join(" ; ", r.Findings.Take(6).Select(f => $"{AiKinds.Label(f.Kind)} « {Cut(f.Quote, 50)} »")));
+                }
+                case "list_add": return ListAdd(a);
+                case "list_remove": return ListEdit(a, (pl, d) => pl.Draft.RemoveAll(i => i.Id == G(a, "item")) > 0 ? null : "Contenu introuvable.", "Contenu retiré de la liste.");
+                case "list_toggle": return ListEdit(a, (pl, d) => pl.Draft.FirstOrDefault(i => i.Id == G(a, "item")) is { } it ? Do(() => it.Off = a.A["on"] != "True") : "Contenu introuvable.", "Contenu mis à jour.");
+                case "list_move":
+                    return ListEdit(a, (pl, d) =>
+                    {
+                        var from = pl.Draft.FindIndex(i => i.Id == G(a, "item"));
+                        if (from < 0) return "Contenu introuvable.";
+                        var it = pl.Draft[from]; pl.Draft.RemoveAt(from);
+                        pl.Draft.Insert(Math.Clamp(int.Parse(a.A["to"]) - 1, 0, pl.Draft.Count), it);
+                        return null;
+                    }, "Contenu déplacé.");
+                case "list_duration":
+                    return ListEdit(a, (pl, d) => { foreach (var it in pl.Draft.Where(i => Ids(a).Contains(i.Id))) { it.DurationSec = int.Parse(a.A["seconds"]); it.DurationMode = "fixed"; } return null; }, "Durée modifiée.");
+                case "list_transition":
+                    return ListEdit(a, (pl, d) => { foreach (var it in pl.Draft.Where(i => Ids(a).Contains(i.Id))) it.Transition = a.A["transition"]; return null; }, "Transition modifiée.");
+                case "media_rename":
+                {
+                    var id = G(a, "m");
+                    if (!store.Read(d => d.Access.CanWrite(LevelPages.Media) && d.Media.Any(m => m.Id == id && FolderOps.CanEditFile(d, m)))) return new(NoRight);
+                    var old = store.Read(d => d.Media.First(m => m.Id == id).Name);
+                    library.Rename(id, a.A["name"]);
+                    return new(null, "Image renommée.", () => { library.Rename(id, old); return Task.FromResult<string?>(null); });
+                }
+                case "media_describe":
+                {
+                    var id = G(a, "m");
+                    if (!store.Read(d => d.Access.CanWrite(LevelPages.Media) && d.Media.Any(m => m.Id == id && FolderOps.CanEditFile(d, m)))) return new(NoRight);
+                    var desc = a.A["description"]; var tags = a.A["tags"].Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
+                    store.Write(d => { var m = d.Media.First(x => x.Id == id); if (desc.Length > 0) m.AiDesc = desc; if (tags.Count > 0) m.AiTags = tags; m.AiDone = m.AiDone || m.AiDesc != null; });
+                    return new(null, "Description enregistrée.");
+                }
+                case "media_analyze":
+                {
+                    var id = G(a, "m");
+                    if (!store.Read(d => d.Access.CanWrite(LevelPages.Media) && d.Media.Any(m => m.Id == id))) return new(NoRight);
+                    var r = await aiMedia.Analyze(cid, id, ct);
+                    return new(r.Ok ? null : r.Message, r.Ok ? "Image décrite : voir sa fiche dans la médiathèque." : null);
+                }
+                case "composition_create": return await ComposeNew(a, ct);
+                case "text_replace": return TextReplace(a);
+                case "text_fix": return await TextFix(a, ct);
+                case "calendar_create":
+                {
+                    if (!Can(LevelPages.Screens)) return new(NoRight);
+                    var lid = G(a, "l");
+                    var ok = store.Write(d => { if (!d.Playlists.Any(p => p.Id == lid)) return false; d.Calendars.Add(new ScreenCalendar { Name = a.A["name"], DefaultPlaylistId = lid }); return true; });
+                    return new(ok ? null : "Liste introuvable.", ok ? "Calendrier créé : ajoutez-lui des diffusions, puis assignez-le à un écran." : null);
+                }
+                case "calendar_event":
+                {
+                    if (!Can(LevelPages.Screens)) return new(NoRight);
+                    var e = new CalEvent
+                    {
+                        Kind = a.A["kind"] == "off" ? CalEvent.Off : CalEvent.Play, PlaylistId = Guid.TryParse(a.A["l"], out var pl) ? pl : null, Always = a.A["always"] == "True" && a.A["kind"] != "off",
+                        Repeat = true, Days = int.Parse(a.A["days"]) & 127, StartTime = a.A["from"], EndTime = a.A["to"], CreatedUtc = DateTime.UtcNow,
+                    };
+                    if (Calendars.Check(e) is { } bad) return new(bad);
+                    var kid = G(a, "k");
+                    var ids = store.Write(d =>
+                    {
+                        if (d.Calendars.FirstOrDefault(c => c.Id == kid) is not { } cal) return (List<Guid>?)null;
+                        if (e.PlaylistId != null && !d.Playlists.Any(p => p.Id == e.PlaylistId)) return null;
+                        cal.Events.Add(e);
+                        return Calendars.Apply(d, cal);
+                    });
+                    if (ids == null) return new("Calendrier ou liste introuvable.");
+                    await notifier.PublishPlanning(ids);
+                    return new(null, "Ajouté au calendrier" + (ids.Count > 0 ? $" : {ids.Count} écran(s) mis à jour." : "."));
+                }
+                case "calendar_assign":
+                {
+                    if (!SeesScreen(G(a, "s"))) return new(NoRight);
+                    var sid = G(a, "s"); var kid = G(a, "k");
+                    var changed = store.Write(d =>
+                    {
+                        if (d.Calendars.FirstOrDefault(c => c.Id == kid) is not { } cal || d.AllScreens.FirstOrDefault(s => s.Id == sid) is not { } s) return (Guid?)null;
+                        Calendars.Stamp(s, cal);
+                        return s.Token != null ? s.Id : Guid.Empty;
+                    });
+                    if (changed == null) return new("Écran ou calendrier introuvable.");
+                    if (changed != Guid.Empty) await notifier.PublishPlanning(new[] { changed.Value });
+                    return new(null, "Calendrier assigné.");
+                }
+                case "alert_delay":
+                {
+                    if (!store.Read(d => d.Access.IsOrgAdmin)) return new("Seul un administrateur peut changer les alertes.");
+                    var min = int.Parse(a.A["minutes"]);
+                    var old = store.Read(d => d.Tenant.AlertOfflineMinutes);
+                    store.Write(d => d.Tenant.AlertOfflineMinutes = min);
+                    return new(null, "Délai d'alerte modifié.", () => { store.Write(d => d.Tenant.AlertOfflineMinutes = old); return Task.FromResult<string?>(null); });
+                }
+                default: return new("Action inconnue.");
             }
         }
-        catch (UnauthorizedAccessException) { return "Vous n'avez pas les droits pour cette action."; }
-        catch (Exception e) { log.LogWarning(e, "Action de l'assistant en échec."); return "L'action n'a pas pu être faite."; }
+        catch (ReadOnlyLevelException) { return new("Vous êtes en lecture seule sur cette partie."); }
+        catch (UnauthorizedAccessException) { return new(NoRight); }
+        catch (Exception e) { log.LogWarning(e, "Action de l'assistant en échec ({Op}).", a.Op); return new("L'action n'a pas pu être faite."); }
+    }
+
+    private static string? Do(Action act) { act(); return null; }
+    private static HashSet<Guid> Ids(AiAction a) => (a.A.GetValueOrDefault("items") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty).ToHashSet();
+
+    /// <summary>Change un champ d'un écran (avec le moyen de revenir en arrière).</summary>
+    private AiRun ScreenSet(AiAction a, Func<Screen, string, string> change, string value, string done)
+    {
+        var sid = G(a, "s");
+        if (!SeesScreen(sid)) return new(NoRight);
+        var old = store.Write(d => d.AllScreens.FirstOrDefault(s => s.Id == sid) is { } sc ? change(sc, value) : null);
+        if (old == null) return new("Écran introuvable.");
+        return new(null, done, () => { store.Write(d => { if (d.AllScreens.FirstOrDefault(s => s.Id == sid) is { } sc) change(sc, old); }); return Task.FromResult<string?>(null); });
+    }
+
+    private AiRun BandOp(AiAction a)
+    {
+        var sid = G(a, "s");
+        if (!SeesScreen(sid)) return new(NoRight);
+        var err = store.Write(d =>
+        {
+            if (d.AllScreens.FirstOrDefault(s => s.Id == sid) is not { } sc) return "Écran introuvable.";
+            if (!Bands.Allowed(sc)) return "Cet écran n'accepte pas de bandeaux.";
+            var bands = sc.Bands?.Clone() ?? new ScreenBands();
+            var band = a.A["band"] == "bottom" ? bands.Bottom : bands.Top;
+            if (a.Op == "band_off") band.On = false;
+            else
+            {
+                var cell = band.Cells.FirstOrDefault(c => c.Kind == "text") ?? (band.Center = BandKinds.NewCell("text"));
+                cell.Settings["text"] = a.A["text"];
+                band.On = true;
+            }
+            sc.Bands = Bands.Clean(bands);
+            sc.BandsRevision++;
+            return null;
+        });
+        return new(err, err == null ? "Bandeau modifié : publiez l'écran pour l'appliquer." : null);
+    }
+
+    private AiRun ListEdit(AiAction a, Func<Playlist, ClientDb, string?> change, string done)
+    {
+        if (!Can(LevelPages.Playlists)) return new(NoRight);
+        var lid = G(a, "l");
+        var err = store.Write(d =>
+        {
+            if (d.Playlists.FirstOrDefault(p => p.Id == lid) is not { } pl) return "Liste introuvable.";
+            if (!PlaylistOps.CanEdit(d, pl)) return NoRight;
+            var e = change(pl, d);
+            if (e == null) pl.Touch();
+            return e;
+        });
+        return new(err, err == null ? done + " Publiez la liste pour l'appliquer aux écrans." : null);
+    }
+
+    private AiRun ListAdd(AiAction a)
+    {
+        if (!Can(LevelPages.Playlists)) return new(NoRight);
+        var cid = G(a, "content"); var lid = G(a, "l"); var sec = int.Parse(a.A["seconds"]);
+        var m = store.Read(d => d.AllMedia.FirstOrDefault(x => x.Id == cid && !x.Off));
+        if (m == null) return new("Contenu introuvable.");
+        Guid? media; string mode;
+        if (m.AppId == null) { media = apps.CreateFromMedia(m)?.Id; mode = "fixed"; }
+        else { media = m.Id; mode = "content"; }
+        if (media == null) return new("Ce contenu ne peut pas être ajouté à la liste.");
+        var err = store.Write(d =>
+        {
+            if (d.Playlists.FirstOrDefault(p => p.Id == lid) is not { } pl) return "Liste introuvable.";
+            if (!PlaylistOps.CanEdit(d, pl)) return NoRight;
+            pl.Draft.Add(new PlaylistItem { MediaId = media.Value, DurationSec = sec > 0 ? sec : d.Tenant.DefaultDurationSec, DurationMode = mode, Placement = "full" });
+            pl.Touch();
+            return null;
+        });
+        return new(err, err == null ? "Contenu ajouté. Publiez la liste pour l'appliquer aux écrans." : null);
+    }
+
+    // ---------- Compositions : création, remplacement et correction de textes ----------
+
+    private async Task<AiRun> ComposeNew(AiAction a, CancellationToken ct)
+    {
+        var r = await compose.FromSentence(store.ClientId, a.A["sentence"], a.A["portrait"] == "True", ct);
+        if (!r.Ok) return new(r.Message);
+        var slide = r.Slides[0];
+        if (Compositions.Clean(slide.Doc) is not { } c) return new("La composition n'a pas pu être préparée.");
+        var (item, errors) = apps.SaveInstance(Compositions.AppId, null, slide.Name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
+        if (item == null) return new(string.Join(" ", errors));
+        var info = "Composition créée.";
+        if (Guid.TryParse(a.A["l"], out var lid))
+        {
+            var ok = store.Write(d =>
+            {
+                if (d.Playlists.FirstOrDefault(p => p.Id == lid) is not { } pl || !PlaylistOps.CanEdit(d, pl)) return false;
+                pl.Draft.Add(new PlaylistItem { MediaId = item.Id, DurationSec = d.Tenant.DefaultDurationSec, DurationMode = "content", Placement = "full" });
+                pl.Touch();
+                return true;
+            });
+            info += ok ? " Ajoutée à la liste (à publier ensuite)." : " Elle n'a pas pu être ajoutée à la liste.";
+        }
+        return new(null, info);
+    }
+
+    private string? SaveDoc(Guid id, string name, string doc, out string? err)
+    {
+        err = null;
+        if (Compositions.Clean(doc) is not { } c) { err = "La composition est trop grande ou illisible."; return null; }
+        var (item, errors) = apps.SaveInstance(Compositions.AppId, id, name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
+        if (item == null) { err = string.Join(" ", errors); return null; }
+        return c.Doc;
+    }
+
+    private AiRun TextReplace(AiAction a)
+    {
+        var id = G(a, "c");
+        if (apps.Instance(id) is not { AppId: Compositions.AppId } m) return new("Composition introuvable.");
+        var old = m.Settings.GetValueOrDefault("doc") ?? "";
+        if (JsonNode.Parse(old) is not JsonObject doc || doc["els"] is not JsonArray els) return new("Composition illisible.");
+        var find = a.A["find"]; var rep = a.A["replace"]; var n = 0;
+        foreach (var e in els.OfType<JsonObject>().Where(e => Str(e, "type") == "text"))
+            if (Str(e, "text") is { } t && t.Contains(find, StringComparison.Ordinal)) { e["text"] = t.Replace(find, rep, StringComparison.Ordinal); n++; }
+        if (n == 0) return new("Ce texte n'a pas été trouvé dans la composition.");
+        SaveDoc(id, m.Name, doc.ToJsonString(), out var err);
+        if (err != null) return new(err);
+        return new(null, n == 1 ? "1 texte modifié." : n + " textes modifiés.", () => { SaveDoc(id, m.Name, old, out var e2); return Task.FromResult(e2); });
+    }
+
+    private async Task<AiRun> TextFix(AiAction a, CancellationToken ct)
+    {
+        var mode = a.A["mode"];
+        var ids = new List<Guid>();
+        var gid = G(a, "id");
+        if (a.A["kind"] == "c") ids.Add(gid);
+        else ids.AddRange(store.Read(d => d.Playlists.FirstOrDefault(p => p.Id == gid)?.Draft.Select(i => i.MediaId).Distinct().Where(x => d.AllMedia.Any(m => m.Id == x && m.AppId == Compositions.AppId)).Take(10).ToList()) ?? new());
+        if (ids.Count == 0) return new("Aucune composition à corriger.");
+        var undo = new List<(Guid Id, string Name, string Doc)>();
+        var changed = 0; var texts = 0;
+        foreach (var id in ids)
+        {
+            if (apps.Instance(id) is not { AppId: Compositions.AppId } m) continue;
+            var old = m.Settings.GetValueOrDefault("doc") ?? "";
+            if (JsonNode.Parse(old) is not JsonObject doc || doc["els"] is not JsonArray els) continue;
+            var targets = els.OfType<JsonObject>().Where(e => Str(e, "type") == "text" && Str(e, "text") is { Length: > 1 } t && Token.Replace(t, "").Trim().Length > 1).ToList();
+            if (targets.Count == 0) continue;
+            var r = await ai.Complete(store.ClientId, "write", FixSystem(mode), new UserMessageParam { Content = new JsonArray(targets.Select(e => (JsonNode)JsonValue.Create(Str(e, "text")!)!).ToArray()).ToJsonString() }, 3000, ct);
+            if (!r.Ok) return new(changed > 0 ? null : r.Message, changed > 0 ? $"{changed} composition(s) corrigée(s), puis : {r.Message}" : null, changed > 0 ? UndoDocs(undo) : null);
+            var s = r.Text.IndexOf('['); var e2 = r.Text.LastIndexOf(']');
+            if (s < 0 || e2 <= s) continue;
+            JsonArray? fixedTexts;
+            try { fixedTexts = JsonNode.Parse(r.Text[s..(e2 + 1)]) as JsonArray; } catch (JsonException) { continue; }
+            if (fixedTexts == null || fixedTexts.Count != targets.Count) continue;
+            var did = 0;
+            for (var i = 0; i < targets.Count; i++)
+            {
+                var before = Str(targets[i], "text")!;
+                var after = fixedTexts[i] is JsonValue v && v.TryGetValue<string>(out var str) ? str.Trim() : null;
+                if (after == null || after.Length == 0 || after == before || after.Length > before.Length * 3 + 20) continue;
+                if (!Token.Matches(before).Select(x => x.Value).OrderBy(x => x).SequenceEqual(Token.Matches(after).Select(x => x.Value).OrderBy(x => x))) continue;   // un champ {{…}} changé : texte laissé tel quel
+                targets[i]["text"] = after; did++;
+            }
+            if (did == 0) continue;
+            SaveDoc(id, m.Name, doc.ToJsonString(), out var err);
+            if (err != null) continue;
+            undo.Add((id, m.Name, old)); changed++; texts += did;
+        }
+        if (changed == 0) return new(null, "Rien à changer : les textes sont déjà corrects.");
+        return new(null, $"{texts} texte(s) modifié(s) dans {changed} composition(s).", UndoDocs(undo));
+    }
+
+    private Func<Task<string?>> UndoDocs(List<(Guid Id, string Name, string Doc)> docs) => () =>
+    {
+        foreach (var (id, name, doc) in docs) { SaveDoc(id, name, doc, out var err); if (err != null) return Task.FromResult<string?>(err); }
+        return Task.FromResult<string?>(null);
+    };
+
+    private static string FixSystem(string mode)
+    {
+        var what = mode switch
+        {
+            "improve" => "corrigé (orthographe, grammaire, ponctuation) et resserré, sans changer le sens",
+            "formal" => "corrigé et réécrit sur un ton plus formel, sans changer le sens",
+            "warm" => "corrigé et réécrit sur un ton plus chaleureux, sans changer le sens",
+            "short" => "raccourci en gardant l'essentiel",
+            _ => "corrigé seulement des fautes d'orthographe, de grammaire et de ponctuation ; ne reformule rien d'autre",
+        };
+        return "Tu reçois un tableau JSON de textes affichés sur un écran. Renvoie un tableau JSON de même longueur, dans le même ordre, avec chaque texte " + what + "." + " " +
+            "Garde la langue du texte, les majuscules voulues, les retours à la ligne et tout ce qui est entre doubles accolades (par exemple {{nom}}) exactement tels quels. Un texte déjà correct reste identique." + " " +
+            "Réponds uniquement par le tableau JSON.";
     }
 
     private static string? Str(JsonObject o, string k) => o[k] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
