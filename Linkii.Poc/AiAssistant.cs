@@ -19,7 +19,9 @@ public record AiAnswer(bool Ok, string Say, List<AiAction> Actions, string? Link
 /// Assistant (Pro) : la personne écrit ce qu'elle veut savoir ou faire ; l'IA répond d'après l'état de son organisation (écrans, listes, compositions, médias, calendriers,
 /// historique récent) et propose des actions que la personne confirme une à une. Le contexte de la conversation est gardé par la fenêtre et renvoyé à chaque demande.
 /// Tout passe par <see cref="TenantStore"/> et les services de l'application : mêmes droits, mêmes filtres d'aire et de périmètre que les pages. L'IA ne voit que
-/// des repères courts (S1, L1, C1, M1, K1) ; un repère inconnu est ignoré. L'assistant ne publie pas : un changement de liste d'un écran, un bandeau ou un contenu
+/// des repères courts (S1, L1, C1, M1, K1) ; un repère inconnu est ignoré. Une liste ou un calendrier créé dans la réponse reçoit un repère « ref » (NL1, NK1) et un
+/// identifiant tiré d'avance, pour que les actions suivantes l'utilisent (créer la liste, y mettre la composition, la programmer, assigner le calendrier).
+/// L'assistant ne publie pas : un changement de liste d'un écran, un bandeau ou un contenu
 /// de liste attend le bouton « Publier » (les calendriers, eux, s'appliquent tout de suite comme sur leur page).
 /// </summary>
 public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCompose compose, AiReview review, NoticeService notices, DeviceCommandService commands,
@@ -43,16 +45,21 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         - screen_rename {screen,name} · screen_set_list {screens,list:"L1" ou null} (change la liste par défaut de l'écran ; elle ne passe à l'écran qu'à la publication, que la personne fait elle-même)
         - screen_param {screen,name,value} (variable existante de l'écran) · band_text {screens,band:top|bottom,text(160)} · band_off {screens,band}
         LISTES (brouillon seulement ; « item » est le numéro d'un contenu dans la liste, depuis 1)
-        - list_create {name} · list_rename {list,name} · list_duplicate {list,name} · list_review {list} (relit la liste : dates passées, textes oubliés, fautes)
+        - list_create {name,ref:"NL1"} · list_rename {list,name} · list_duplicate {list,name} · list_review {list} (relit la liste : dates passées, textes oubliés, fautes)
         - list_add {list,content:"C1" ou "M1",seconds} · list_remove {list,item} · list_move {list,item,to} · list_duration {list,item (ou "all"),seconds} · list_transition {list,item (ou "all"),transition:cut|fade|push-left|push-right|push-up|push-down|zoom} · list_toggle {list,item,on:true|false}
         IMAGES ET COMPOSITIONS
         - media_rename {media,name} · media_describe {media,description,tags:[...]} · media_analyze {media} (l'IA décrit l'image)
         - composition_create {sentence,portrait:false,list:"L1" ou null} (crée une composition depuis une phrase) · text_replace {composition,find,replace} (remplace du texte exact dans une composition)
         - text_fix {target:"C1" ou "L1",mode:correct|improve|formal|warm|short} (corrige ou reformule les textes d'une composition, ou de toutes les compositions d'une liste)
         PLANNING ET RÉGLAGES
-        - calendar_create {name,list} · calendar_event {calendar,kind:play|off,list,days:[1..7 lundi=1],from:"HH:mm",to:"HH:mm",always:false} · calendar_assign {screens,calendar:"K1"}
+        - calendar_create {name,list,ref:"NK1"} (« list » : liste jouée hors des événements) · calendar_event {calendar,kind:play|off,list,days:[1..7 lundi=1] (absent : tous les jours),from:"HH:mm",to:"HH:mm",always:false} · calendar_assign {screens,calendar:"K1"}
         - alert_delay {minutes:1|5|10|15|30|60} (délai avant l'alerte « écran hors ligne »)
         « open » : un repère (S1, L1, C1) ou « media », « screens », « playlists », « programmations », « settings », sinon null.
+        ENCHAÎNER : les actions s'exécutent dans l'ordre. Une liste ou un calendrier que tu crées reçoit dans « ref » un nouveau repère (« NL1 », « NL2 »… pour une liste, « NK1 »… pour un calendrier) que les actions suivantes utilisent comme les autres. Crée d'abord, utilise ensuite.
+        Fais tout l'enchaînement qu'une demande implique dans la même réponse, sans t'arrêter à la première étape. Un « planning » ou une « programmation » est un calendrier.
+        Exemple « programme la compo C2 de 9 h à 11 h sur l'écran S1 » :
+          1. la liste : une liste existante qui contient C2 (ou une liste vide du même nom : list_add dedans), sinon list_create {name,ref:"NL1"} puis list_add {list:"NL1",content:"C2"} ;
+          2. le calendrier : si S1 a un calendrier qui ne sert qu'à lui, calendar_event dessus ; sinon calendar_create {name,list: la liste que S1 joue aujourd'hui (sinon NL1),ref:"NK1"}, calendar_event {calendar:"NK1",kind:"play",list:"NL1",from:"09:00",to:"11:00"}, calendar_assign {screens:["S1"],calendar:"NK1"}.
         Règles : n'agis que sur ce qui est demandé ; garde en tête la conversation (« sur celui-là aussi » parle de ce dont on vient de parler). Si la demande est floue ou vise ce que tu ne reconnais pas, pose une question dans « say » et laisse « actions » vide.
         Tu ne publies jamais, tu ne supprimes aucun écran, liste, composition, média ni membre, tu n'éteins pas l'appareil : explique-le et propose « open ». Un écran hors ligne ne reçoit pas de message ni de commande : dis-le.
         N'invente aucun repère. N'écris dans un message ou un texte que ce que la personne demande. Pour répondre à une question (état, historique, recherche d'image), « actions » reste vide.
@@ -75,21 +82,29 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
             var t = d.Tenant;
             var screens = new Dictionary<string, Guid>(); var lists = new Dictionary<string, Guid>(); var items = new Dictionary<string, List<Guid>>();
             var comps = new Dictionary<string, Guid>(); var media = new Dictionary<string, Guid>(); var cals = new Dictionary<string, Guid>(); var names = new Dictionary<Guid, string>();
+            // repères des listes et des calendriers d'abord : la ligne d'un écran dit lesquels il utilise
+            var shownLists = d.Playlists.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).Take(40).ToList();
+            var shownCals = d.Calendars.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).Take(20).ToList();
+            var listKey = shownLists.Select((p, n) => (p.Id, K: "L" + (n + 1))).ToDictionary(x => x.Id, x => x.K);
+            var calKey = shownCals.Select((c, n) => (c.Id, K: "K" + (n + 1))).ToDictionary(x => x.Id, x => x.K);
+            var screenKey = new Dictionary<Guid, string>();
             var sb = new StringBuilder("Écrans :\n");
             var i = 0;
             foreach (var s in d.AllScreens.Where(s => s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Take(60))
             {
                 var v = ScreenEvents.View(d.Root, t, s, now);
-                var key = "S" + ++i; screens[key] = s.Id; names[s.Id] = s.Name;
+                var key = "S" + ++i; screens[key] = s.Id; names[s.Id] = s.Name; screenKey[s.Id] = key;
                 var pars = s.Params.Count > 0 ? " · variables : " + string.Join(", ", s.Params.Take(5).Select(p => $"{p.Name}={p.Value}")) : "";
-                sb.Append($"{key} · {s.Name} · {(v.Online ? (v.Asleep ? "en ligne, en veille" : "en ligne") : "hors ligne")}{(v.Paused ? ", en pause" : "")} · liste : {v.Playlist?.Name ?? "aucune"} · aire : {v.Area?.Name ?? "-"}{pars}\n");
+                var lk = v.Playlist != null && listKey.TryGetValue(v.Playlist.Id, out var lkk) ? $" ({lkk})" : "";
+                var cal = s.CalendarId is { } scid ? " · calendrier : " + (calKey.TryGetValue(scid, out var ckk) ? ckk : "oui") : "";
+                sb.Append($"{key} · {s.Name} · {(v.Online ? (v.Asleep ? "en ligne, en veille" : "en ligne") : "hors ligne")}{(v.Paused ? ", en pause" : "")} · liste : {v.Playlist?.Name ?? "aucune"}{lk}{cal} · aire : {v.Area?.Name ?? "-"}{pars}\n");
             }
             if (i == 0) sb.Append("(aucun écran)\n");
 
             var mediaById = d.AllMedia.ToDictionary(m => m.Id, m => m);
             sb.Append("\nListes de diffusion (contenus numérotés) :\n");
             var j = 0;
-            foreach (var p in d.Playlists.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).Take(40))
+            foreach (var p in shownLists)
             {
                 var key = "L" + ++j; lists[key] = p.Id; names[p.Id] = p.Name; items[key] = p.Draft.Select(x => x.Id).ToList();
                 var content = string.Join(" ; ", p.Draft.Take(12).Select((x, n) => $"{n + 1}) {(mediaById.TryGetValue(x.MediaId, out var m) ? m.Name : "?")}{(x.Off ? " (désactivé)" : "")} {x.DurationSec} s"));
@@ -124,10 +139,13 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
 
             sb.Append("\nCalendriers de programmation :\n");
             var q = 0;
-            foreach (var c in d.Calendars.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).Take(20))
+            foreach (var c in shownCals)
             {
                 var key = "K" + ++q; cals[key] = c.Id; names[c.Id] = c.Name;
-                sb.Append($"{key} · {c.Name} · liste par défaut : {d.Playlists.FirstOrDefault(p => p.Id == c.DefaultPlaylistId)?.Name ?? "?"} · {c.Events.Count} événement(s)\n");
+                var on = Calendars.ScreensOf(d, c.Id);
+                var dl = d.Playlists.FirstOrDefault(p => p.Id == c.DefaultPlaylistId);
+                sb.Append($"{key} · {c.Name} · liste par défaut : {dl?.Name ?? "?"}{(dl != null && listKey.TryGetValue(dl.Id, out var dk) ? $" ({dk})" : "")} · {c.Events.Count} événement(s) · " +
+                    (on.Count == 0 ? "assigné à aucun écran" : $"assigné à {on.Count} écran(s) : {string.Join(", ", on.Take(8).Select(s => screenKey.GetValueOrDefault(s.Id, s.Name)))}") + "\n");
             }
             if (q == 0) sb.Append("(aucun calendrier)\n");
 
@@ -208,6 +226,22 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         string Num(string f, int dflt, int min, int max) => (x[f] is JsonValue v && v.TryGetValue<double>(out var d) ? (int)Math.Clamp(Math.Round(d), min, max) : dflt).ToString();
         AiAction Act(string label, params (string K, string V)[] args) => new(op, label, args.ToDictionary(a => a.K, a => a.V));
         string N(Guid g) => c.Names.GetValueOrDefault(g, "?");
+        // objet créé dans cette réponse : son identifiant est tiré d'avance, et le repère « ref » que l'IA lui donne sert aux actions suivantes
+        // (ajouter à la nouvelle liste, programmer le nouveau calendrier, l'assigner). Un repère déjà pris est ignoré.
+        // Filet : le numéro suivant (L5 après L1 à L4) vise aussi l'objet créé, si l'IA continue la numérotation au lieu de donner « ref ».
+        Guid New(Dictionary<string, Guid> map, string name)
+        {
+            var g = Guid.NewGuid();
+            bool Free(string k) => !c.Screens.ContainsKey(k) && !c.Lists.ContainsKey(k) && !c.Comps.ContainsKey(k) && !c.Media.ContainsKey(k) && !c.Cals.ContainsKey(k);
+            void Take(string k) { map[k] = g; if (map == c.Lists) c.Items[k] = new(); }
+            if (Str(x, "ref") is { Length: > 0 and <= 12 } r && Free(r)) Take(r);
+            var prefix = map == c.Lists ? "L" : "K";
+            var n = 1;
+            while (!Free(prefix + n)) n++;
+            Take(prefix + n);
+            c.Names[g] = name;
+            return g;
+        }
 
         switch (op)
         {
@@ -276,7 +310,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
             case "list_create":
             {
                 var name = Cut(Str(x, "name"), 80);
-                if (name.Length > 0) yield return Act($"Créer la liste « {name} »", ("name", name));
+                if (name.Length > 0) yield return Act($"Créer la liste « {name} »", ("name", name), ("id", New(c.Lists, name).ToString()));
                 break;
             }
             case "list_rename":
@@ -383,7 +417,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
             case "calendar_create":
             {
                 var name = Cut(Str(x, "name"), 80);
-                if (name.Length > 0 && List() is { } l) yield return Act($"Créer le calendrier « {name} » (liste par défaut : « {N(l)} »)", ("name", name), ("l", l.ToString()));
+                if (name.Length > 0 && List() is { } l) yield return Act($"Créer le calendrier « {name} » (liste par défaut : « {N(l)} »)", ("name", name), ("l", l.ToString()), ("id", New(c.Cals, name).ToString()));
                 break;
             }
             case "calendar_event":
@@ -467,8 +501,9 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 {
                     if (!Can(LevelPages.Playlists)) return new(NoRight);
                     var p = new Playlist { Name = a.A["name"], UpdatedAt = DateTime.UtcNow };
-                    store.Write(d => d.Playlists.Add(p));
-                    return new(null, "Liste créée.");
+                    if (Guid.TryParse(a.A.GetValueOrDefault("id"), out var nid)) p.Id = nid;   // identifiant tiré d'avance : les actions suivantes le visent
+                    var ok = store.Write(d => { if (d.Root.Playlists.Any(x => x.Id == p.Id)) return false; d.Playlists.Add(p); return true; });
+                    return new(ok ? null : "Cette liste a déjà été créée.", ok ? "Liste créée." : null);
                 }
                 case "list_rename": return ListEdit(a, (pl, d) => { pl.Name = a.A["name"]; pl.UpdatedAt = DateTime.UtcNow; return null; }, "Liste renommée.");
                 case "list_duplicate":
@@ -540,8 +575,16 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 {
                     if (!Can(LevelPages.Screens)) return new(NoRight);
                     var lid = G(a, "l");
-                    var ok = store.Write(d => { if (!d.Playlists.Any(p => p.Id == lid)) return false; d.Calendars.Add(new ScreenCalendar { Name = a.A["name"], DefaultPlaylistId = lid }); return true; });
-                    return new(ok ? null : "Liste introuvable.", ok ? "Calendrier créé : ajoutez-lui des diffusions, puis assignez-le à un écran." : null);
+                    var cal = new ScreenCalendar { Name = a.A["name"], DefaultPlaylistId = lid };
+                    if (Guid.TryParse(a.A.GetValueOrDefault("id"), out var kid0)) cal.Id = kid0;   // identifiant tiré d'avance : les actions suivantes le visent
+                    var err = store.Write(d =>
+                    {
+                        if (!d.Playlists.Any(p => p.Id == lid)) return "Liste introuvable (si elle devait être créée juste avant, confirmez aussi sa création).";
+                        if (d.Root.Calendars.Any(c => c.Id == cal.Id)) return "Ce calendrier a déjà été créé.";
+                        d.Calendars.Add(cal);
+                        return null;
+                    });
+                    return new(err, err == null ? "Calendrier créé." : null);
                 }
                 case "calendar_event":
                 {
