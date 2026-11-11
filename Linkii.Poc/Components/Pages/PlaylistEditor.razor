@@ -16,11 +16,6 @@
 @using Microsoft.JSInterop
 @implements IDisposable
 
-@if (readOnlyHere)
-{
-    <div class="dw-note"><Ico Name="lock" Size="15" /><span class="grow">Cette liste est dans un dossier partagé en <b>lecture seule</b> : vous pouvez la voir et la diffuser, pas la modifier.</span></div>
-}
-
 <YoutubeDurations Items="media" OnUpdated="Refresh" />
 
 @if (Current is { } pl)
@@ -31,188 +26,220 @@
     var air = diff.OnAir;
     var pend = diff.ToUpdate.Count();
     var chosen = diff.Chosen.Count;
-    @* Page d'une liste (maquette maquettes/liste-diffusion-allegee.html) : en-tête qui dit où en est la diffusion, avec un seul bouton orange
-       « Publier sur N écrans » visible depuis les trois onglets ; onglets Fil de lecture / Aperçu / Diffusion. Le fil est un panneau « Ordre de passage »
-       qui reste en haut quand on fait défiler la bibliothèque ; liste vide : une zone de dépôt dit quoi faire. *@
-    <div class="pfx plx @(mini ? "mini" : "")" @ref="flowRoot">
-        <header class="nx-head">
-            <div>
-                <div class="pt-crumb"><a href="playlists" @onclick="Close" @onclick:preventDefault>Listes de diffusion</a> › @pl.Name</div>
-                @if (renaming)
-                {
-                    <div class="rename-row">
-                        <input style="min-width:0;width:300px" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" aria-label="Nom de la liste" />
-                        <button class="btn sm" @onclick="() => Rename(pl)">Enregistrer</button>
-                        <button class="btn ghost sm" @onclick="() => renaming = false">Annuler</button>
-                    </div>
-                }
-                else
-                {
-                    <div class="nx-title">
-                        <h1>@pl.Name</h1>
-                        @if (!readOnlyHere) { <button type="button" class="nx-ren" title="Renommer" aria-label="Renommer la liste" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }
-                    </div>
-                }
-                <p class="nx-meta">
-                    @if (air > 0) { <button type="button" class="nx-live" title="@(diff.Outside > 0 ? $"Dont {diff.Outside} hors de votre périmètre" : null)" @onclick='() => ptab = "diff"'>● Diffusée sur @air écran@(air > 1 ? "s" : "")</button> }
-                    else { <span>Non diffusée</span> }
-                </p>
-            </div>
-            <div class="nx-act">
-                @if (pl.Draft.Count == 0 && air == 0 && chosen == 0)
-                {
-                }
-                else if (pend > 0 || chosen > 0)
-                {
-                    @if (pend > 0) { <button type="button" class="nx-pend" title="Choisir les écrans à mettre à jour" @onclick='() => ptab = "diff"'>@pend écran@(pend > 1 ? "s" : "") à mettre à jour</button> }
-                    @if (diff.Changed) { <button type="button" class="btn ghost" @onclick="() => diff.Undo()">Annuler</button> }
-                    <div class="nx-split">
-                        <button type="button" class="btn publish-btn" disabled="@(chosen == 0 || diff.Busy)" title="@(chosen == 0 ? "Activez au moins un écran dans l'onglet Diffusion" : null)" @onclick="() => PublishNow(null)"><Ico Name="upload" Size="16" /> @diff.ButtonLabel()@if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
-                        <button type="button" class="btn publish-btn nx-caret" disabled="@(chosen == 0 || diff.Busy)" aria-label="Autres façons de publier" aria-haspopup="menu" aria-expanded="@(pubMenu ? "true" : "false")" @onclick="() => pubMenu = !pubMenu"><Ico Name="chevron" Size="16" /></button>
-                        @if (pubMenu)
+    var needs = pend > 0 || chosen > 0;   // une modification à publier : le bouton passe à l'orange
+    var pubTip = needs ? $"Publier sur {(chosen > 0 ? chosen : pend)} écran{((chosen > 0 ? chosen : pend) > 1 ? "s" : "")}" : air > 0 ? "À jour : rien à publier" : "Choisir les écrans";
+    @* Page d'une liste (maquette maquettes/liste-page-epuree.html) : plus d'onglets. À gauche le titre, trois boutons (aperçu, publier, ⋯) puis une ligne par contenu ;
+       à droite la colonne « Ajouter » sur toute la hauteur, dont les contenus se glissent dans la liste. L'aperçu et la publication s'ouvrent en fenêtres. *@
+    <div class="lep" @ref="flowRoot">
+        <div class="lep-main">
+            @if (readOnlyHere)
+            {
+                <div class="dw-note"><Ico Name="lock" Size="15" /><span class="grow">Cette liste est dans un dossier partagé en <b>lecture seule</b> : vous pouvez la voir et la diffuser, pas la modifier.</span></div>
+            }
+            <div class="pt-crumb"><a href="playlists" @onclick="Close" @onclick:preventDefault>‹ Listes de diffusion</a></div>
+            <header class="le-head">
+                <div>
+                    <div class="le-title @(readOnlyHere ? "ro" : "")">
+                        @if (renaming)
                         {
-                            <div class="kebab-backdrop" @onclick="() => pubMenu = false"></div>
-                            <div class="nx-menu" role="menu">
-                                <button type="button" role="menuitem" @onclick="() => PublishNow(DateTime.MinValue)"><Ico Name="upload" Size="16" /><span>Tout publier maintenant<small>Sans tenir compte des heures choisies</small></span></button>
-                                <button type="button" role="menuitem" @onclick="() => { pubMenu = false; whenFor = null; whenOpen = true; }"><Ico Name="calendar" Size="16" /><span>Tout programmer…<small>Une même heure pour tous les écrans activés</small></span></button>
-                            </div>
+                            <input class="le-ni le-ni-h" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" @onblur="() => Rename(pl)" aria-label="Nom de la liste" />
+                        }
+                        else
+                        {
+                            <h1 @onclick="() => { if (!readOnlyHere) StartRename(pl); }">@pl.Name</h1>
+                            @if (!readOnlyHere) { <button type="button" class="le-ren" title="Renommer" aria-label="Renommer la liste" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }
                         }
                     </div>
-                }
-                else if (air > 0)
-                {
-                    <span class="nx-ok"><Ico Name="check" Size="16" /> À jour sur @air écran@(air > 1 ? "s" : "")</span>
-                }
-                else
-                {
-                    <button type="button" class="btn ghost" @onclick='() => ptab = "diff"'><Ico Name="monitor" Size="16" /> Choisir les écrans</button>
-                }
-            </div>
-        </header>
-
-        @* Relecture de l'IA avant publication (Pro) : bandeau, puis fenêtre « Avant de publier ». Maquette : maquettes/ia-pistes.html *@
-        @if (pl.Draft.Count > 0)
-        {
-            var pending = RevPending(pl);
-            @if (revState.Status == AiStatus.NeedsPro && pl.Draft.Any(i => !i.Off))
-            {
-                <div class="ai-bar up"><Ico Name="crown" Size="16" /><span>La relecture automatique avant publication est comprise dans le plan Pro.</span><span class="grow"></span><a class="btn ghost sm" href="/settings?tab=abonnement">Voir les plans</a></div>
-            }
-            else if (revState.Status is AiStatus.Quota or AiStatus.Cap)
-            {
-                <div class="ai-bar up"><Ico Name="alert" Size="16" /><span>Relecture de l'IA en pause : @(revState.Trial ? "les demandes de l'essai sont utilisées" : "quota du mois atteint"). Vous pouvez publier normalement.</span></div>
-            }
-            else if (revState.Available && revBusy && rev == null)
-            {
-                <div class="ai-bar run" role="status"><Ico Name="spark" Size="16" /><span>Relecture de la liste en cours</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
-            }
-            else if (revState.Available && rev is { Ok: true })
-            {
-                if (pending.Count > 0)
-                {
-                    <div class="ai-bar"><Ico Name="spark" Size="16" /><span><b>Relecture de l'IA :</b> @pending.Count remarque@(pending.Count > 1 ? "s" : "") à regarder avant de publier.</span><span class="grow"></span><button type="button" class="btn ghost sm" @onclick="() => ShowReview(false)"><Ico Name="spark" Size="14" /> Voir dans l'assistant</button></div>
-                }
-                else
-                {
-                    <div class="ai-bar ok"><Ico Name="check" Size="16" /><span><b>Relecture de l'IA :</b> rien à signaler.</span></div>
-                }
-            }
-        }
-
-        <div class="nx-tabsrow">
-            <nav class="pfx-tabs" role="tablist" aria-label="Liste de diffusion">
-                <button type="button" role="tab" aria-selected="@(ptab == "fil" ? "true" : "false")" class="@(ptab == "fil" ? "on" : "")" @onclick='() => ptab = "fil"'>Fil de lecture<span class="c">@active</span></button>
-                <button type="button" role="tab" aria-selected="@(ptab == "apercu" ? "true" : "false")" class="@(ptab == "apercu" ? "on" : "")" @onclick='() => ptab = "apercu"'>Aperçu</button>
-                <button type="button" role="tab" aria-selected="@(ptab == "diff" ? "true" : "false")" class="@(ptab == "diff" ? "on" : "")" @onclick='() => ptab = "diff"'>Diffusion</button>
-            </nav>
-        </div>
-
-        @if (ptab == "apercu")
-        {
-            <SimulatorDialog PlaylistId="Id" Inline="true" />
-        }
-        else if (ptab == "diff")
-        {
-            <PlaylistPublish Model="diff" ItemsCount="pl.Draft.Count" OnChanged="StateHasChanged" OnGoFil='() => ptab = "fil"' OnProgram="ProgramOne" />
-        }
-        else
-        {
-            <section class="nx-filbox" aria-label="Ordre de passage">
-                <div class="nx-filhd">
-                    <span class="t"><NxIco Name="list" Size="18" /> Ordre de passage</span>
-                    @if (pl.Draft.Count > 0) { <span>· @active contenu@(active > 1 ? "s" : "") · boucle de <b class="mono">@Helpers.FormatDuration(total)</b></span> }
-                    <span class="grow"></span>
-                    @if (!readOnlyHere && pl.Draft.Count > 1)
-                    {
-                        <span>Glissez une carte pour changer l'ordre, ou une vignette à l'endroit voulu</span>
-                        <button type="button" class="btn ghost sm" title="Choisir l'effet de passage d'un contenu au suivant, pour tous les contenus" @onclick="() => trAll = true"><Ico Name="transition" Size="15" /> Transitions</button>
-                    }
+                    <p class="le-meta">
+                        <span>@active contenu@(active > 1 ? "s" : "")@(pl.Draft.Count > 0 ? $" · {Helpers.FormatDuration(total)}" : "")</span>
+                        @if (air > 0) { <span>·</span><button type="button" class="le-live" title="@(diff.Outside > 0 ? $"Dont {diff.Outside} hors de votre périmètre" : null)" @onclick="OpenPublish">● Diffusée sur @air écran@(air > 1 ? "s" : "")</button> }
+                        else { <span>· Non diffusée</span> }
+                    </p>
                 </div>
-                @if (pl.Draft.Count == 0)
+            </header>
+
+            @* Relecture de l'IA avant publication (Pro) : bandeau, puis fenêtre « Avant de publier ». Maquette : maquettes/ia-pistes.html *@
+            @if (pl.Draft.Count > 0)
+            {
+                var pending = RevPending(pl);
+                @if (revState.Status == AiStatus.NeedsPro && pl.Draft.Any(i => !i.Off))
                 {
-                    @if (readOnlyHere)
+                    <div class="ai-bar up"><Ico Name="crown" Size="16" /><span>La relecture automatique avant publication est comprise dans le plan Pro.</span><span class="grow"></span><a class="btn ghost sm" href="/settings?tab=abonnement">Voir les plans</a></div>
+                }
+                else if (revState.Status is AiStatus.Quota or AiStatus.Cap)
+                {
+                    <div class="ai-bar up"><Ico Name="alert" Size="16" /><span>Relecture de l'IA en pause : @(revState.Trial ? "les demandes de l'essai sont utilisées" : "quota du mois atteint"). Vous pouvez publier normalement.</span></div>
+                }
+                else if (revState.Available && revBusy && rev == null)
+                {
+                    <div class="ai-bar run" role="status"><Ico Name="spark" Size="16" /><span>Relecture de la liste en cours</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
+                }
+                else if (revState.Available && rev is { Ok: true })
+                {
+                    if (pending.Count > 0)
                     {
-                        <p class="nx-ro-empty">Cette liste est vide.</p>
+                        <div class="ai-bar"><Ico Name="spark" Size="16" /><span><b>Relecture de l'IA :</b> @pending.Count remarque@(pending.Count > 1 ? "s" : "") à regarder avant de publier.</span><span class="grow"></span><button type="button" class="btn ghost sm" @onclick="() => ShowReview(false)"><Ico Name="spark" Size="14" /> Voir dans l'assistant</button></div>
                     }
                     else
                     {
-                        <div class="nx-empty">
-                            <span class="nx-eico"><Ico Name="plus" Size="30" /></span>
-                            <div class="nx-etx">
-                                <b>Votre liste est vide</b>
-                                <p>Cliquez sur un contenu de la bibliothèque ci-dessous, ou glissez-le ici. Les contenus passeront à l'écran dans cet ordre, en boucle.</p>
-                            </div>
-                            <div class="nx-eact">
-                                @if (canImport) { <label for="@ImportInputId" class="btn" role="button" tabindex="0"><Ico Name="upload" Size="16" /> Importer un fichier</label> }
-                                @if (Has(Compositions.AppId)) { <a class="btn ghost" href="@NewCompositionUrl"><NxIco Name="layout" Size="16" /> Créer une composition</a> }
-                            </div>
-                            <ol class="nx-steps"><li class="on"><i>1</i>Ajoutez des contenus</li><li><i>2</i>Vérifiez l'aperçu</li><li><i>3</i>Publiez sur vos écrans</li></ol>
+                        <div class="ai-bar ok"><Ico Name="check" Size="16" /><span><b>Relecture de l'IA :</b> rien à signaler.</span></div>
+                    }
+                }
+            }
+
+            @* trois boutons au-dessus de la liste : aperçu, publier (icône seule : blanc si tout est à jour, orange s'il y a une modification), menu ⋯ *@
+            <div class="le-bar"><div class="le-act">
+                <button type="button" class="le-ib" title="Aperçu" aria-label="Aperçu de la liste" disabled="@(pl.Draft.Count == 0)" @onclick="() => trying = true"><Ico Name="eye" Size="20" /></button>
+                <button type="button" class="btn @(needs ? "publish-btn" : "ghost") le-pub" title="@pubTip" aria-label="@pubTip" disabled="@(pl.Draft.Count == 0 && air == 0 && chosen == 0)" @onclick="OpenPublish"><Ico Name="upload" Size="18" />@if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
+                <span class="le-dw">
+                    <button type="button" class="le-ib" title="Plus" aria-label="Plus d'actions" aria-haspopup="menu" aria-expanded="@(listMenu ? "true" : "false")" @onclick="() => listMenu = !listMenu"><NxIco Name="more" Size="20" /></button>
+                    @if (listMenu)
+                    {
+                        <div class="kebab-backdrop" @onclick="() => listMenu = false"></div>
+                        <div class="le-menu" role="menu">
+                            @if (!readOnlyHere) { <button type="button" role="menuitem" @onclick="() => { listMenu = false; StartRename(pl); }"><Ico Name="edit" Size="16" /> Renommer</button> }
+                            <button type="button" role="menuitem" @onclick="() => { listMenu = false; whenFor = null; whenOpen = true; }"><Ico Name="calendar" Size="16" /> Programmer la diffusion…</button>
+                            @if (!readOnlyHere && pl.Draft.Count > 1) { <button type="button" role="menuitem" @onclick="() => { listMenu = false; trAll = true; }"><Ico Name="transition" Size="16" /> Transitions…</button> }
                         </div>
                     }
+                </span>
+            </div></div>
+
+            @* une ligne par contenu ; vide : une zone de dépôt qui dit quoi faire *@
+            <div class="le-rows">
+                @if (pl.Draft.Count == 0)
+                {
+                    <div class="le-empty">
+                        <i><NxIco Name="list" Size="30" /></i>
+                        <b>@(readOnlyHere ? "Cette liste est vide" : "Cette liste est vide")</b>
+                        @if (!readOnlyHere)
+                        {
+                            <span>Choisissez un contenu dans la colonne de droite : il s'ajoute ici, dans l'ordre de passage, en boucle.</span><br />
+                            <span class="arr"><Ico Name="arrow-right" Size="16" /> Glissez un contenu ici, ou cliquez dessus</span>
+                        }
+                    </div>
                 }
                 else
                 {
-                    <div class="nx-fil">
+                    <div class="le-card">
                         @foreach (var r in rows)
                         {
                             var row = r;
-                            <div class="nx-it @RowClass(row)" data-i="@row.Index" data-id="@row.It.Id" data-drag="@(Draggable(row) ? "1" : null)" @key="row.It">@Card(row)</div>
+                            <div class="le-row @RowClass(row) @(readOnlyHere ? "ro" : "")" data-i="@row.Index" data-id="@row.It.Id" data-drag="@(Draggable(row) ? "1" : null)" @key="row.It" @onclick="() => OnRowClick(pl, row)">
+                                <span class="le-n" title="@(Draggable(row) ? "Glisser pour changer l'ordre" : null)">@row.Num</span>
+                                <span class="le-th" style="@(row.Masked ? null : $"background:{row.Color}")">
+                                    @if (row.Masked) { <span class="le-lock"><Ico Name="lock" Size="22" /></span> }
+                                    else if (row.M?.AppId == Compositions.AppId) { <CompositionThumb Item="row.M" Files="media" Contain="true" /> }
+                                    else if (row.M != null) { <MediaThumb Media="row.M" All="media" Wide="true" /> }
+                                </span>
+                                <span class="le-nm">
+                                    <span class="le-nmt">
+                                        @if (renRow == row.It)
+                                        {
+                                            <input class="le-ni" @ref="renRowInput" @bind="renRowValue" @bind:event="oninput" @onkeydown="RenRowKey" @onblur="SaveRowRename" @onclick:stopPropagation="true" aria-label="Nom du contenu" />
+                                        }
+                                        else
+                                        {
+                                            <b class="le-name" title="@(CanRename(row) ? "Cliquer pour renommer" : null)" @onclick:stopPropagation="true" @onclick="() => { if (CanRename(row)) StartRowRename(row); else OnRowClick(pl, row); }">@(row.Masked ? "Contenu masqué" : row.M?.Name ?? "(supprimé)")</b>
+                                            @if (CanRename(row)) { <button type="button" class="le-pen" title="Renommer" aria-label="Renommer @row.M!.Name" @onclick:stopPropagation="true" @onclick="() => StartRowRename(row)"><Ico Name="edit" Size="14" /></button> }
+                                        }
+                                    </span>
+                                    <small>
+                                        <span>@(row.M != null ? Kind(row.M) : "")</span>
+                                        @if (row.Incomplete && !row.Masked)
+                                        {
+                                            @* application ajoutée sans tout ce qu'il lui faut : la pastille orange ouvre son réglage *@
+                                            <button type="button" class="le-st todo" title="Il manque une information à ce contenu : il ne passe pas tant qu'il n'est pas configuré" @onclick:stopPropagation="true" @onclick="() => OnRowClick(pl, row)">À configurer</button>
+                                        }
+                                        else if (StateText(row) is { } st) { <span class="le-st @StateClass(row)">@st</span> }
+                                        @if (ScanOn(row))
+                                        {
+                                            var scans = scanCounts.TryGetValue(row.It.Id, out var sc) ? sc.Scans : 0;
+                                            <button type="button" class="le-scan" title="Scans du QR code ces 90 derniers jours : ouvrir le réglage" @onclick:stopPropagation="true" @onclick='() => OpenSettings(pl, row.It, row.M, "qr")'><Ico Name="qr" Size="13" /> @scans scan@(scans > 1 ? "s" : "")</button>
+                                        }
+                                    </small>
+                                </span>
+                                <span class="le-dw">@DurView(row)</span>
+                                <span class="le-dw">
+                                    @if (!readOnlyHere && !row.Masked && row.M != null)
+                                    {
+                                        <button type="button" class="le-more @(rowMenu == row.It ? "on" : "")" title="Plus" aria-label="Plus d'actions pour @row.M.Name" aria-haspopup="menu" aria-expanded="@(rowMenu == row.It ? "true" : "false")" @onclick:stopPropagation="true" @onclick="() => { durFor = null; rowMenu = rowMenu == row.It ? null : row.It; }"><NxIco Name="more" Size="18" /></button>
+                                        @if (rowMenu == row.It)
+                                        {
+                                            <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => rowMenu = null"></div>
+                                            <div class="le-menu" role="menu" @onclick:stopPropagation="true">
+                                                <button type="button" role="menuitem" @onclick="() => { rowMenu = null; OpenSettings(pl, row.It, row.M); }"><Ico Name="edit" Size="16" /> Modifier…</button>
+                                                <button type="button" role="menuitem" @onclick="() => { rowMenu = null; OpenProgramming(row); }"><Ico Name="calendar" Size="16" /> Programmer la diffusion…</button>
+                                                <button type="button" role="menuitem" title="Le même contenu passe une seconde fois, juste après" @onclick="() => { rowMenu = null; Duplicate(pl, row.It); }"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                                                <hr />
+                                                <button type="button" role="menuitem" class="danger" @onclick="() => { rowMenu = null; RemoveWithUndo(pl, row.It); }"><Ico Name="trash" Size="16" /> Retirer de la liste</button>
+                                            </div>
+                                        }
+                                    }
+                                </span>
+                            </div>
                         }
-                        @if (!readOnlyHere) { <button type="button" class="nx-addt" title="Choisir un contenu dans la bibliothèque ci-dessous" @onclick="GoLibrary"><Ico Name="plus" Size="22" /><span>Ajouter</span></button> }
-                        <div class="nx-loop"><i><NxIco Name="loop" Size="18" /></i>puis reprend au n° 1</div>
+                        <div class="le-loop"><NxIco Name="loop" Size="15" /> Puis retour au premier contenu</div>
                     </div>
                 }
-            </section>
+            </div>
+        </div>
 
-            @if (!readOnlyHere && !mini)
-            {
-                var tabs = LibTabs().ToList();
-                var shown = tabs.Where(t => t.Count > 0).ToList();   // types vides masqués
-                if (shown.Count == 0 && tabs.Count > 0) shown.Add(tabs[0]);
-                if (!shown.Any(t => t.Key == libTab) && shown.Count > 0) libTab = shown[0].Key;
-                <section class="nx-lib @(pl.Draft.Count == 0 ? "empty" : "")" aria-label="Bibliothèque" @ref="libRoot">
-                    <div class="nx-libtop">
-                        <h3>Ajouter au fil</h3>
-                        <span class="nx-here"><Ico Name="arrow-down" Size="14" /> Choisissez ici</span>
-                        <nav class="pfx-tabs" role="tablist" aria-label="Types de contenus">
-                            @foreach (var t in shown)
-                            {
-                                var tab = t;
-                                <button type="button" role="tab" aria-selected="@(libTab == tab.Key ? "true" : "false")" class="@(libTab == tab.Key ? "on" : "")" @onclick='() => { libTab = tab.Key; libSearch = ""; }'>@tab.Label<span class="c">@tab.Count</span></button>
-                            }
-                        </nav>
-                        <label class="search-box"><Ico Name="search" Size="16" /><input @ref="libSearchInput" placeholder="Rechercher" aria-label="Rechercher dans la bibliothèque" @bind="libSearch" @bind:event="oninput" /></label>
-                        @LibAction()
-                    </div>
-                    @if (pickAt is { } pa)
-                    {
-                        <p class="pfx-hint nx-pick"><b>Le prochain contenu choisi sera inséré en position @(pa + 1).</b> <button type="button" class="pf-link" @onclick="() => pickAt = null">Annuler</button></p>
-                    }
-                    <div class="nx-grid">@LibGrid()</div>
-                </section>
-            }
+        @if (!readOnlyHere && !mini)
+        {
+            var tabs = LibTabs().ToList();
+            var shown = tabs.Where(t => t.Count > 0).ToList();   // types vides masqués
+            if (shown.Count == 0 && tabs.Count > 0) shown.Add(tabs[0]);
+            if (libTab != "all" && !shown.Any(t => t.Key == libTab)) libTab = "all";
+            <aside class="le-side" aria-label="Ajouter à la liste" @ref="libRoot">
+                <div class="le-sidehd">
+                    <h3>Ajouter</h3>
+                    @LibAction()
+                </div>
+                <p class="le-hint">Glissez un contenu dans la liste, ou cliquez dessus pour l'ajouter à la fin.</p>
+                <div class="le-tools">
+                    <label class="search-box"><Ico Name="search" Size="16" /><input @ref="libSearchInput" placeholder="Rechercher" aria-label="Rechercher dans les contenus" @bind="libSearch" @bind:event="oninput" /></label>
+                    <select class="le-sel" aria-label="Type de contenu" @bind="libTab">
+                        <option value="all">Tout</option>
+                        @foreach (var t in shown) { <option value="@t.Key">@t.Label</option> }
+                    </select>
+                </div>
+                <div class="le-list">@CatList()</div>
+            </aside>
         }
     </div>
+
+    @if (pubOpen)
+    {
+        @* « Publier la liste » : les écrans qui reçoivent la modification, maintenant ou à l'heure choisie *@
+        <div class="modal-backdrop" @onclick="() => pubOpen = false"></div>
+        <div class="modal le-pubm" role="dialog" aria-modal="true" aria-labelledby="pub-title">
+            <div class="modal-head">
+                <div class="grow"><h3 id="pub-title">Publier la liste</h3><small>@pl.Name</small></div>
+                <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => pubOpen = false"><Ico Name="x" Size="20" /></button>
+            </div>
+            <div class="modal-body">
+                <PlaylistPublish Model="diff" ItemsCount="pl.Draft.Count" OnChanged="StateHasChanged" OnGoFil="() => pubOpen = false" OnProgram="ProgramOne" />
+            </div>
+            <div class="modal-foot">
+                @if (diff.Changed) { <button type="button" class="btn ghost" @onclick="() => diff.Undo()">Annuler les changements</button> }
+                <span class="grow"></span>
+                <button type="button" class="btn ghost" @onclick="() => pubOpen = false">Fermer</button>
+                <div class="nx-split">
+                    <button type="button" class="btn publish-btn" disabled="@(chosen == 0 || diff.Busy)" title="@(chosen == 0 ? "Activez au moins un écran" : null)" @onclick="() => PublishNow(null)"><Ico Name="upload" Size="16" /> @diff.ButtonLabel()@if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
+                    <button type="button" class="btn publish-btn nx-caret" disabled="@(chosen == 0 || diff.Busy)" aria-label="Autres façons de publier" aria-haspopup="menu" aria-expanded="@(pubMenu ? "true" : "false")" @onclick="() => pubMenu = !pubMenu"><Ico Name="chevron" Size="16" /></button>
+                    @if (pubMenu)
+                    {
+                        <div class="kebab-backdrop" @onclick="() => pubMenu = false"></div>
+                        <div class="nx-menu up" role="menu">
+                            <button type="button" role="menuitem" @onclick="() => PublishNow(DateTime.MinValue)"><Ico Name="upload" Size="16" /><span>Tout publier maintenant<small>Sans tenir compte des heures choisies</small></span></button>
+                            <button type="button" role="menuitem" @onclick="() => { pubMenu = false; whenFor = null; whenOpen = true; }"><Ico Name="calendar" Size="16" /><span>Tout programmer…<small>Une même heure pour tous les écrans activés</small></span></button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
     @if (whenOpen)
     {
         <PublishWhen Model="diff" Target="whenFor" OnClose="() => whenOpen = false" OnDone="WhenDone" />
@@ -519,7 +546,6 @@ else
     private List<Playlist> playlists = new();
     private List<MediaItem> media = new();
     private bool trying;   // « Aperçu » : simulateur de la liste
-    private string ptab = "fil";   // onglet ouvert : fil | apercu | diff
 
     // ---------- Diffusion : état partagé par l'en-tête (« Publier sur N écrans ») et l'onglet Diffusion ----------
     private PlaylistDiffusion diff = default!;
@@ -532,8 +558,8 @@ else
     {
         pubMenu = false;
         // la relecture de l'IA a des remarques non traitées : on les montre d'abord (« Publier quand même » reste possible)
-        if (Current is { } cur && revState.Available && RevPending(cur).Count > 0) { revAll = all; ShowReview(true); return; }
-        if (await diff.Publish(all)) Reload();
+        if (Current is { } cur && revState.Available && RevPending(cur).Count > 0) { revAll = all; pubOpen = false; ShowReview(true); return; }
+        if (await diff.Publish(all)) { Reload(); pubOpen = false; }
     }
 
     private DateTime? revAll;
@@ -542,6 +568,7 @@ else
         var left = Current is { } cur ? RevPending(cur).Count : 0;
         if (!await diff.Publish(revAll)) { Panel.Refresh(); return; }
         Reload();
+        pubOpen = false;
         revOutcome = left > 0 ? $"Liste publiée malgré {left} remarque{(left > 1 ? "s" : "")}." : "Liste publiée après la relecture.";
         revPublish = false;
         Panel.Release(revKey);
@@ -685,10 +712,6 @@ else
     private void ProgramOne(PlaylistDiffusion.ScreenRow r) { whenFor = r; whenOpen = true; }
 
     private void WhenDone() { whenOpen = false; whenFor = null; Reload(); }
-
-    // « + Ajouter » du fil : la bibliothèque remonte sous le fil et la recherche prend le curseur
-    private async Task GoLibrary() { try { await JS.InvokeVoidAsync("linkiiFlow.toLib", libRoot, libSearchInput); } catch (JSException) { } }
-
 
     // Ajout d'un contenu : colonne des apps activées (hors widgets d'écran), à glisser dans le fil ou à cliquer (ajout à la fin).
     private List<AppManifest> enabledApps = new();
@@ -870,7 +893,7 @@ else
 
     private string RowClass(FlowRow r) => (r.It.Id == freshId ? "fresh " : r.Incomplete && !r.Masked ? "todo " : "") + (r.It.Off ? "off " : "") + (r.Hold ? "hold " : "") + (r.Masked ? "masked" : "");
 
-    private bool Draggable(FlowRow r) => !readOnlyHere && durFor != r.It;
+    private bool Draggable(FlowRow r) => !readOnlyHere && renRow != r.It;
 
     private bool ScanOn(FlowRow r) => growth && r.It.QrOn && r.It.Placement == "full" && r.M != null && !r.Masked;
 
@@ -880,37 +903,6 @@ else
     private string? TextDur(FlowRow r) => DurationText(r) is { Length: > 0 } s && !char.IsDigit(s[0]) ? "txt" : null;
 
     private string Kind(MediaItem m) => m.AppId != null ? Svc.Find(m.AppId)?.Name ?? "App" : m.Type == "video" ? "Vidéo" : "Image";
-
-    // ---------- Carte du fil (maquette liste-diffusion-allegee.html) : vignette carrée avec son numéro et sa durée, nom dessous ;
-    // au survol Régler et Retirer en haut à droite ; une pastille sous le nom seulement quand le contenu ne passe pas normalement ----------
-    private RenderFragment Card(FlowRow r) =>
-        @<text>
-        <div class="nx-th" style="@(r.Masked ? null : $"background:{r.Color}")">
-            @if (r.Masked) { <span class="nx-lock"><Ico Name="lock" Size="26" /></span> }
-            else if (r.M?.AppId == Compositions.AppId) { <CompositionThumb Item="r.M" Files="media" Contain="true" /> }
-            else if (r.M != null) { <MediaThumb Media="r.M" All="media" Wide="true" /> }
-            <span class="nx-n">@r.Num</span>
-            @if (ScanOn(r)) { <span class="nx-scan">@Scan(r)</span> }
-            @DurChip(r)
-            @if (!r.Masked && r.M != null && !readOnlyHere && Current is { } hpl)
-            {
-                <div class="nx-hv">
-                    <button type="button" title="Régler ce contenu" aria-label="Régler @r.M.Name" @onclick="() => OpenSettings(hpl, r.It, r.M)"><NxIco Name="tune" Size="15" /></button>
-                    <button type="button" title="Retirer du fil" aria-label="Retirer @r.M.Name du fil" @onclick="() => RemoveWithUndo(hpl, r.It)"><Ico Name="x" Size="15" /></button>
-                </div>
-            }
-        </div>
-        <div class="nx-nm" title="@(r.Masked ? "Contenu masqué" : r.M?.Name)">@(r.Masked ? "Contenu masqué" : r.M?.Name ?? "(supprimé)")</div>
-        @if (r.Incomplete && !r.Masked && Current is { } cpl)
-        {
-            @* application ajoutée sans tout ce qu'il lui faut : la pastille orange ouvre son réglage *@
-            <button type="button" class="nx-state todo" title="Il manque une information à ce contenu : il ne passe pas tant qu'il n'est pas configuré" @onclick="() => OpenSettings(cpl, r.It, r.M)">À configurer</button>
-        }
-        else if (StateText(r) is { } st)
-        {
-            <span class="nx-state @StateClass(r)">@st</span>
-        }
-        </text>;
 
     // Sous le nom : pourquoi le contenu ne passe pas normalement (désactivé, hors période, en continu), ou sa période ; rien sinon
     private static string? StateText(FlowRow r) =>
@@ -922,46 +914,109 @@ else
 
     private static string StateClass(FlowRow r) => r.It.Off ? "off" : r.Hold ? "hold" : "per";
 
-    // Sous la carte : un contenu qui ne passe pas en ce moment porte une pastille de couleur (hors période en orange, à configurer, désactivé)
-    private static string WhenClass(FlowRow r) => r.Plays ? "" : r.It.Off ? "st off" : r.Hold ? "st hold" : r.Incomplete ? "st todo" : "";
+    private int? TakePick() { var p = pickAt; pickAt = null; return p; }
 
-    // Sous la carte : l'heure de passage dans la boucle, ou pourquoi elle n'y passe pas
-    private string When(FlowRow r) =>
-        r.Plays ? $"passe à {Helpers.FormatDuration(r.Start)}"
-        : r.It.Off ? "désactivé"
-        : r.Hold ? "hors période"
-        : r.Incomplete ? "à configurer"
-        : r.It.Placement != "full" ? "affiché en continu" : "";
+    // Clic sur une ligne : le réglage du contenu (fenêtre « Modifier »)
+    private void OnRowClick(Playlist pl, FlowRow r)
+    {
+        if (readOnlyHere || r.Masked || r.M == null) return;
+        rowMenu = null; durFor = null;
+        OpenSettings(pl, r.It, r.M);
+    }
 
-    // Durée toujours visible ; un clic la rend modifiable (m:ss ou secondes, flèches ↑ ↓ pour une seconde de plus ou de moins)
-    private RenderFragment DurChip(FlowRow r) =>
+    // ---------- Renommer un contenu directement sur sa ligne (clic sur le nom ou crayon) ----------
+    private PlaylistItem? renRow;
+    private string renRowValue = "";
+    private ElementReference renRowInput;
+    private bool focusRenRow;
+
+    private bool CanRename(FlowRow r) => !readOnlyHere && !r.Masked && r.M is { AppId: not null };
+
+    private void StartRowRename(FlowRow r)
+    {
+        if (!CanRename(r)) return;
+        renRow = r.It; renRowValue = r.M!.Name; focusRenRow = true; rowMenu = null; durFor = null;
+    }
+
+    private void RenRowKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") SaveRowRename();
+        else if (e.Key == "Escape") renRow = null;
+    }
+
+    private void SaveRowRename()
+    {
+        if (renRow is not { } it) return;
+        renRow = null;
+        var m = media.FirstOrDefault(x => x.Id == it.MediaId);
+        var name = renRowValue.Trim();
+        if (m == null || name.Length == 0 || name == m.Name) return;
+        var err = Svc.RenameInstance(m.Id, name);
+        if (err != null) Toast.Error(err); else Toast.Ok("Contenu renommé.");
+        Reload();
+    }
+
+    // ---------- Durée : on la choisit dans une liste, avec l'interrupteur « Appliquer à tous les contenus » ----------
+    private PlaylistItem? durFor;   // ligne dont le sélecteur de durée est ouvert
+    private bool durAll;
+    private PlaylistItem? rowMenu;   // ligne dont le menu ⋯ est ouvert
+    private static readonly int[] DurPresets = { 3, 5, 8, 10, 15, 20, 30, 45, 60, 90, 120 };
+
+    private static string DurLabel(int s) => s < 60 ? $"{s} s" : s % 60 != 0 ? $"{s / 60} min {s % 60} s" : $"{s / 60} min";
+
+    private void OpenDur(PlaylistItem it) { rowMenu = null; durAll = false; durFor = durFor == it ? null : it; }
+
+    private RenderFragment DurView(FlowRow r) =>
         @<text>
-            @if (durFor == r.It)
+            @if (!r.Masked && r.M != null && r.It.Placement == "full" && !readOnlyHere)
             {
-                <span class="nx-d edit"><input @ref="durInput" @bind="durValue" @bind:event="oninput" @onkeydown="DurKey" @onblur="SaveDur" aria-label="Durée (minutes:secondes ou secondes)" placeholder="0:08" /></span>
-            }
-            else if (!r.Masked && r.M != null && r.It.Placement == "full" && !readOnlyHere)
-            {
-                <button type="button" class="nx-d mono" title="Durée d'affichage : cliquer pour modifier" @onclick="() => StartDur(r.It)">@DurationText(r)</button>
+                var cur = Helpers.ItemSeconds(r.It, r.M, Svc.Find(r.M.AppId), media);
+                <button type="button" class="le-d" title="Choisir la durée d'affichage" aria-haspopup="menu" aria-expanded="@(durFor == r.It ? "true" : "false")" @onclick:stopPropagation="true" @onclick="() => OpenDur(r.It)">@DurationText(r) <Ico Name="chevron" Size="13" /></button>
+                @if (durFor == r.It)
+                {
+                    <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => durFor = null"></div>
+                    <div class="le-menu le-dp" role="menu" @onclick:stopPropagation="true">
+                        <div class="le-dph">Durée d'affichage</div>
+                        <div class="le-dpg">
+                            @foreach (var s in DurPresets.Append(cur).Distinct().OrderBy(x => x))
+                            {
+                                var sec = s;
+                                <button type="button" class="@(sec == cur ? "on" : "")" @onclick="() => SetDuration(r.It, sec)">@DurLabel(sec)</button>
+                            }
+                        </div>
+                        <label class="le-sw"><input type="checkbox" @bind="durAll" /><i></i><span>Appliquer à tous les contenus</span></label>
+                    </div>
+                }
             }
             else if (DurationText(r) is { Length: > 0 } t)
             {
-                <span class="nx-d ro mono">@t</span>
+                <span class="le-d ro">@t</span>
             }
         </text>;
 
-    private RenderFragment Scan(FlowRow r)
+    private void SetDuration(PlaylistItem it, int secs)
     {
-        var scans = scanCounts.TryGetValue(r.It.Id, out var sc) ? sc.Scans : 0;
-        return @<button type="button" class="pf-scan" title="Scans du QR code ces 90 derniers jours : ouvrir le réglage" @onclick='() => { if (Current is { } pl) OpenSettings(pl, r.It, r.M, "qr"); }'><Ico Name="qr" Size="13" /> @scans scan@(scans > 1 ? "s" : "")</button>;
+        if (Current is not { } pl) return;
+        var all = durAll;
+        durFor = null; durAll = false;
+        var targets = all
+            ? pl.Draft.Where(x => x.Placement == "full" && media.FirstOrDefault(m => m.Id == x.MediaId) is { } mm && !MediaLibrary.UsesHidden(mm, hidden)).ToList()
+            : new List<PlaylistItem> { it };
+        WriteList(d =>
+        {
+            foreach (var x in targets)
+            {
+                x.DurationSec = secs;
+                if (ContentDuration(media.FirstOrDefault(m => m.Id == x.MediaId))) x.DurationMode = "fixed";
+            }
+            pl.Touch();
+        });
+        Toast.Ok(all ? $"Durée de {DurLabel(secs)} appliquée aux {targets.Count} contenus." : $"Durée : {DurLabel(secs)}.");
+        Reload();
     }
 
-    // Le fil défile d'environ trois cartes
-    private async Task Scroll(int dir) { try { await JS.InvokeVoidAsync("linkiiFlow.scroll", flowRoot, dir); } catch (JSException) { } }
-
-    // « + » entre deux cartes : le prochain contenu choisi dans la bibliothèque s'insère là
-    private void PickAt(int at) { pickAt = pickAt == at ? null : at; if (mini) mini = false; }
-    private int? TakePick() { var p = pickAt; pickAt = null; return p; }
+    private bool listMenu, pubOpen;
+    private void OpenPublish() { listMenu = false; pubMenu = false; pubOpen = true; }
 
     // Fenêtre « Régler » : contenu précédent / suivant sans fermer (les modifications en cours ne sont pas enregistrées)
     private void StepSettings(int dir)
@@ -980,7 +1035,7 @@ else
     }
 
     // ---------- Bibliothèque en onglets par type (§186) ----------
-    private string libTab = "img", libSearch = "";
+    private string libTab = "all", libSearch = "";
     private int? pickAt;
     private bool mini, presMenu;
     private int onScreens;
@@ -1006,7 +1061,7 @@ else
     // Bouton d'ajout propre à l'onglet
     private RenderFragment LibAction() => libTab switch
     {
-        "img" or "vid" => ImportButton(),
+        "all" or "img" or "vid" => ImportButton(),
         "cmp" => @<a class="btn sm" href="@NewCompositionUrl" @onclick="() => insertAt = pickAt"><Ico Name="plus" Size="15" /> Nouvelle composition</a>,
         "web" => @<button type="button" class="btn sm" @onclick='() => NewWithForm("webpage")'><Ico Name="plus" Size="15" /> Nouvelle page web</button>,
         "pres" => @<span class="pfx-pop">
@@ -1065,83 +1120,86 @@ else
     private int UsedItem(Guid id) => Current?.Draft.Count(i => i.MediaId == id) ?? 0;
     private int UsedApp(string appId) => Current?.Draft.Count(i => media.FirstOrDefault(x => x.Id == i.MediaId)?.AppId == appId) ?? 0;
 
-    // Vignette de la bibliothèque : un clic ajoute (à la fin, ou à l'endroit choisi par « + »), on peut aussi la glisser dans le fil.
-    // Aperçu : l'icône de l'application (appId), une composition, ou la vignette du média ou du contenu.
-    private RenderFragment Tile(string drag, string name, string sub, MediaItem? m, string? appId, Action add, int used, bool busy = false, bool fresh = false, string? len = null) =>
-        @<button type="button" class="nx-tile @(fresh ? "fresh" : "") @(busy ? "busy" : "")" data-add="@(busy ? null : drag)" data-fresh="@(fresh ? "1" : null)" disabled="@busy"
-                 title="@(busy ? "Conversion en cours : le média sera ajoutable dans un instant" : pickAt is { } p ? $"Insérer « {name} » en position {p + 1}" : "Cliquer : ajouter à la fin du fil · glisser : le poser à l'endroit voulu")" @onclick="add">
-            <span class="nx-tb">
-                @if (appId != null) { <span class="nx-app" style="background:@AppIcon.LookOf(appId).Color"><AppIcon Id="@appId" Tile="false" Size="34" /></span> }
-                else if (m?.AppId == Compositions.AppId) { <CompositionThumb Item="m" Files="compoFiles" Contain="true" /> }
-                else if (m != null) { <MediaThumb Media="m" All="media" /> }
-                @if (used > 0) { <span class="pfx-used">dans le fil@(used > 1 ? $" ×{used}" : "")</span> }
-                @if (fresh) { <span class="pfx-new">Nouveau</span> }
-                @if (len != null) { <span class="pfx-len mono">@len</span> }
-                <span class="pfx-add" aria-hidden="true"><span><Ico Name="plus" Size="14" /> @(pickAt is { } p2 ? $"Insérer en {p2 + 1}" : "Ajouter")</span></span>
-            </span>
-            <span class="nx-tn">@name</span>
-        </button>;
+    // Colonne « Ajouter » : un contenu de la bibliothèque. Un clic l'ajoute à la fin, on peut aussi le glisser dans la liste (playlist-rows.js).
+    // Aperçu : l'icône de l'application (AppId), une composition, ou la vignette du média ou du contenu.
+    private sealed record CatEntry(string Drag, string Name, string Sub, MediaItem? M, string? AppId, Action Add, int Used, bool Busy = false, bool Fresh = false);
 
-    // Contenu de l'onglet ouvert, filtré par la recherche
-    private RenderFragment LibGrid() => libTab switch
+    private IEnumerable<CatEntry> FileEntries(string type) =>
+        pickFiles.Where(m => m.Type == type && (freshFiles.Contains(m.Id) || Match(m.Name)))
+            .OrderByDescending(m => freshFiles.Contains(m.Id)).ThenByDescending(m => m.AddedUtc)
+            .Select(f => new CatEntry("med:" + f.Id, f.Name, f.Status != null ? "Conversion en cours…" : MediaMeta(f), f, null, () => AddMedia(f, TakePick()), UsedFile(f.Id), f.Status != null, freshFiles.Contains(f.Id)));
+
+    private IEnumerable<CatEntry> CompoEntries() =>
+        compoItems.Where(c => Match(c.Name))
+            .Select(c => new CatEntry("cmp:" + c.Id, c.Name, Compositions.Size(c.Settings) is { } sz ? $"Composition · {sz.W} × {sz.H}" : "Composition", c, null, () => AddCompositionAt(c, TakePick()), UsedItem(c.Id)));
+
+    private IEnumerable<CatEntry> InstanceEntries(List<MediaItem> items) =>
+        items.Where(m => Match(m.Name))
+            .Select(m => new CatEntry("inst:" + m.Id, m.Name, Svc.Find(m.AppId)?.Name ?? "", m, null, () => AddInstance(m, TakePick()), UsedItem(m.Id)));
+
+    private IEnumerable<CatEntry> AppEntries() =>
+        OtherApps.Where(a => Match(a.Name) || Match(a.Summary))
+            .Select(a => new CatEntry("app:" + a.Id, a.Name, a.Summary ?? a.Category ?? "Application", null, a.Id, () => AddEmpty(a, TakePick()), UsedApp(a.Id)));
+
+    private IEnumerable<CatEntry> CatEntries(string kind)
     {
-        "img" => MediaGrid("image"),
-        "vid" => MediaGrid("video"),
-        "cmp" => CompoGrid(),
-        "pres" => InstanceGrid(presItems, "Aucune présentation. « Nouvelle présentation » en importe une (PowerPoint, Google Slides, PDF, Canva…)."),
-        "web" => InstanceGrid(webItems, "Aucune page web. « Nouvelle page web » en crée une."),
-        _ => AppGrid()
+        if (kind is "all" or "img") foreach (var e in FileEntries("image")) yield return e;
+        if (kind is "all" or "vid") foreach (var e in FileEntries("video")) yield return e;
+        if (kind is "all" or "cmp") foreach (var e in CompoEntries()) yield return e;
+        if (kind is "all" or "pres") foreach (var e in InstanceEntries(presItems)) yield return e;
+        if (kind is "all" or "web") foreach (var e in InstanceEntries(webItems)) yield return e;
+        if (kind is "all" or "app") foreach (var e in AppEntries()) yield return e;
+    }
+
+    private string CatEmpty() => libTab switch
+    {
+        "img" => "Aucune image dans la médiathèque." + (canImport ? " « Importer » en ajoute depuis votre ordinateur." : ""),
+        "vid" => "Aucune vidéo dans la médiathèque." + (canImport ? " « Importer » en ajoute depuis votre ordinateur." : ""),
+        "cmp" => "Aucune composition. « Nouvelle composition » ouvre l'éditeur ; elle s'ajoutera à cette liste.",
+        "pres" => "Aucune présentation. « Nouvelle présentation » en importe une (PowerPoint, Google Slides, PDF, Canva…).",
+        "web" => "Aucune page web. « Nouvelle page web » en crée une.",
+        "app" => "Aucune autre application ne vous est attribuée." + (Modes.Expert ? " Activez-en dans la page Applications." : ""),
+        _ => libSearch.Length > 0 ? "Aucun contenu trouvé" : "Aucun contenu pour l'instant."
     };
 
-    private RenderFragment CompoGrid() =>
-        @<text>
-            @foreach (var c in compoItems.Where(c => Match(c.Name)))
-            {
-                var ci = c;
-                @Tile("cmp:" + ci.Id, ci.Name, Compositions.Size(ci.Settings) is { } sz ? $"{sz.W} × {sz.H}" : "Composition", ci, null, () => AddCompositionAt(ci, TakePick()), UsedItem(ci.Id))
-            }
-            @if (compoItems.Count == 0) { <p class="hint pfx-empty">Aucune composition. « Nouvelle composition » ouvre l'éditeur ; elle s'ajoutera à cette liste.</p> }
-        </text>;
+    private const int CatAllMax = 80;
 
-    private RenderFragment AppGrid() =>
+    // Contenu de la colonne : imports en cours, puis les contenus du type choisi (« Tout » : les plus récents de chaque type), filtrés par la recherche
+    private RenderFragment CatList() =>
         @<text>
-            @foreach (var a in OtherApps.Where(a => Match(a.Name) || Match(a.Summary)))
+            @if (libTab is "all" or "img" or "vid")
             {
-                var app = a;
-                @Tile("app:" + app.Id, app.Name, app.Summary ?? app.Category ?? "", null, app.Id, () => AddEmpty(app, TakePick()), UsedApp(app.Id))
+                @foreach (var j in ImportJobs)
+                {
+                    var job = j;
+                    var failed = job.State == "error";
+                    <div class="le-job @(failed ? "fail" : "")" role="status">
+                        <b>@job.Name</b>
+                        @if (!failed) { <span class="bar"><i style="width:@(MediaUploader.Pct(job))%"></i></span> }
+                        <span>@(failed ? job.Error ?? "Échec de l'import" : job.Note ?? (job.Total is > 0 ? $"Import · {MediaUploader.Pct(job)} %" : "Import…")) · <button type="button" class="pf-link" @onclick="() => DismissImport(job)">@(failed ? "Retirer" : "Annuler")</button></span>
+                    </div>
+                }
             }
-            @if (!OtherApps.Any()) { <p class="hint pfx-empty">Aucune autre application ne vous est attribuée.@(Modes.Expert ? " Activez-en dans la page Applications." : "")</p> }
-        </text>;
-
-    private RenderFragment MediaGrid(string type) =>
-        @<text>
-            @foreach (var j in ImportJobs)
+            @{
+                var entries = CatEntries(libTab).ToList();
+                var shownEntries = libTab == "all" ? entries.Take(CatAllMax).ToList() : entries;
+            }
+            @foreach (var e in shownEntries)
             {
-                var job = j;
-                var failed = job.State == "error";
-                <div class="nx-tile job @(failed ? "fail" : "")" role="status">
-                    <span class="nx-tb">@if (failed) { <Ico Name="x" Size="20" /> } else { <span class="pf-med-bar" style="width:@(MediaUploader.Pct(job))%"></span> }</span>
-                    <span class="nx-tn">@job.Name</span>
-                    <span class="pfx-ts">@(failed ? job.Error ?? "Échec de l'import" : job.Note ?? (job.Total is > 0 ? $"Import · {MediaUploader.Pct(job)} %" : "Import…")) · <button type="button" class="pf-link" @onclick="() => DismissImport(job)">@(failed ? "Retirer" : "Annuler")</button></span>
-                </div>
+                var en = e;
+                <button type="button" class="le-it @(en.Used > 0 ? "in" : "") @(en.Fresh ? "fresh" : "")" data-add="@(en.Busy ? null : en.Drag)" data-fresh="@(en.Fresh ? "1" : null)" disabled="@en.Busy"
+                        title="@(en.Busy ? "Conversion en cours : le média sera ajoutable dans un instant" : "Cliquer : ajouter à la fin · glisser : le poser à l'endroit voulu")" @onclick="en.Add">
+                    <span class="ic @(en.AppId != null ? "app" : "")" style="@(en.AppId != null ? $"background:{AppIcon.LookOf(en.AppId).Color}" : en.M != null ? $"background:{AppIcon.LookOf(LookId(en.M)).Color}" : null)">
+                        @if (en.AppId != null) { <AppIcon Id="@en.AppId" Tile="false" Size="26" /> }
+                        else if (en.M?.AppId == Compositions.AppId) { <CompositionThumb Item="en.M" Files="compoFiles" Contain="true" /> }
+                        else if (en.M != null) { <MediaThumb Media="en.M" All="media" /> }
+                    </span>
+                    <span><b>@en.Name</b><small>@en.Sub</small></span>
+                    <span class="le-add"><Ico Name="@(en.Used > 0 ? "check" : "plus")" Size="16" /></span>
+                </button>
             }
-            @foreach (var f in pickFiles.Where(m => m.Type == type && (freshFiles.Contains(m.Id) || Match(m.Name))).OrderByDescending(m => freshFiles.Contains(m.Id)).ThenByDescending(m => m.AddedUtc))
-            {
-                var file = f;
-                var busy = file.Status != null;
-                @Tile("med:" + file.Id, file.Name, busy ? "Conversion en cours…" : MediaMeta(file), file, null, () => AddMedia(file, TakePick()), UsedFile(file.Id), busy, freshFiles.Contains(file.Id), type == "video" && Helpers.VideoSeconds(file) is { } vs ? Helpers.FormatDuration(vs) : null)
-            }
-            @if (!pickFiles.Any(m => m.Type == type) && ImportJobs.Count == 0) { <p class="hint pfx-empty">Aucune @(type == "image" ? "image" : "vidéo") dans la médiathèque.@(canImport ? " « Importer » en ajoute depuis votre ordinateur." : "")</p> }
-        </text>;
-
-    private RenderFragment InstanceGrid(List<MediaItem> items, string empty) =>
-        @<text>
-            @foreach (var m in items.Where(m => Match(m.Name)))
-            {
-                var inst = m;
-                @Tile("inst:" + inst.Id, inst.Name, Svc.Find(inst.AppId)?.Name ?? "", inst, null, () => AddInstance(inst, TakePick()), UsedItem(inst.Id))
-            }
-            @if (items.Count == 0) { <p class="hint pfx-empty">@empty</p> }
+            @if (entries.Count == 0 && ImportJobs.Count == 0) { <p class="le-none">@CatEmpty()</p> }
+            else if (libTab == "all" && entries.Count > CatAllMax) { <p class="le-none">… et @(entries.Count - CatAllMax) autres : choisissez un type ou cherchez par nom.</p> }
         </text>;
 
     /// <summary>Page web ou présentation déjà réglée ailleurs : elle rejoint le fil avec sa propre copie des réglages (la changer ici ne change pas l'autre liste).</summary>
@@ -1279,52 +1337,6 @@ else
         var off = !it.Off;
         WriteList(d => { it.Off = off; pl.Touch(); });
         Toast.Ok(off ? "Contenu désactivé : il reste dans la liste mais la boucle le saute." : "Contenu réactivé.");
-        Reload();
-    }
-
-    // Durée modifiée sur place : « m:ss » ou un nombre de secondes ; une app « jusqu'à la fin » passe en durée fixe
-    private PlaylistItem? durFor;
-    private string durValue = "";
-    private ElementReference durInput;
-    private bool focusDur;
-
-    private void StartDur(PlaylistItem it)
-    {
-        durFor = it; focusDur = true;
-        var m = media.FirstOrDefault(x => x.Id == it.MediaId);
-        durValue = Helpers.FormatDuration(Helpers.ItemSeconds(it, m, Svc.Find(m?.AppId), media));
-    }
-
-    private void DurKey(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter") SaveDur();
-        else if (e.Key == "Escape") durFor = null;
-        else if (e.Key is "ArrowUp" or "ArrowDown" && ParseDuration(durValue) is { } s)   // une seconde de plus ou de moins
-            durValue = Helpers.FormatDuration(Math.Clamp(s + (e.Key == "ArrowUp" ? 1 : -1), 1, 86400));
-    }
-
-    private static int? ParseDuration(string s)
-    {
-        s = s.Trim();
-        var parts = s.Split(':');
-        if (parts.Length == 1 && int.TryParse(parts[0], out var sec)) return sec;
-        if (parts.Length == 2 && int.TryParse(parts[0], out var mm) && int.TryParse(parts[1], out var ss) && ss is >= 0 and < 60) return mm * 60 + ss;
-        if (parts.Length == 3 && int.TryParse(parts[0], out var hh) && int.TryParse(parts[1], out var m2) && int.TryParse(parts[2], out var s2) && m2 is >= 0 and < 60 && s2 is >= 0 and < 60) return hh * 3600 + m2 * 60 + s2;
-        return null;
-    }
-
-    private void SaveDur()
-    {
-        if (durFor is not { } it || Current is not { } pl) return;
-        durFor = null;
-        if (ParseDuration(durValue) is not { } secs || secs < 1 || secs > 86400) { Toast.Error("Durée invalide : saisissez par exemple 0:08, 1:30 ou 45 (entre 1 seconde et 24 heures)."); return; }
-        var content = ContentDuration(media.FirstOrDefault(x => x.Id == it.MediaId));
-        WriteList(d =>
-        {
-            it.DurationSec = secs;
-            if (content) it.DurationMode = "fixed";
-            pl.Touch();
-        });
         Reload();
     }
 
@@ -1717,16 +1729,16 @@ else
     {
         RevRefresh();   // la carte de relecture du panneau suit la liste (contenu désactivé, remarque ignorée…)
         if (focusRename && renaming) { focusRename = false; await renameInput.FocusAsync(); }
-        if (focusDur && durFor != null) { focusDur = false; try { await JS.InvokeVoidAsync("linkiiFlow.select", durInput); } catch (JSException) { } }
+        if (focusRenRow && renRow != null) { focusRenRow = false; try { await JS.InvokeVoidAsync("linkiiFlow.select", renRowInput); } catch (JSException) { } }
         if (revealFresh) { revealFresh = false; try { await JS.InvokeVoidAsync("linkiiFlow.revealMedia"); } catch (JSException) { } }   // média importé : amené en vue en tête de la liste
         // Le fil n'existe qu'une fois la liste de lecture chargée ; le script ignore un second appel sur le même élément.
         if (flowRoot.Context != null && flowRoot.Id != flowInitId)
         {
             flowInitId = flowRoot.Id;
             selfRef ??= DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("linkiiFlow.init", flowRoot, selfRef);
+            await JS.InvokeVoidAsync("linkiiRows.init", flowRoot, selfRef);
         }
-        if (revealId is { } rid) { revealId = null; try { await JS.InvokeVoidAsync("linkiiFlow.reveal", rid.ToString()); } catch (JSException) { } }
+        if (revealId is { } rid) { revealId = null; try { await JS.InvokeVoidAsync("linkiiRows.reveal", rid.ToString()); } catch (JSException) { } }
     }
 
     private void OnRenameKey(KeyboardEventArgs e, Playlist pl)
@@ -1737,6 +1749,7 @@ else
 
     private void Rename(Playlist pl)
     {
+        if (!renaming) return;
         var name = renameValue.Trim();
         if (name.Length == 0) return;
         WriteList(d => { pl.Name = name; pl.UpdatedAt = DateTime.UtcNow; });   // le nom n'est pas publié : aucun écran à notifier
