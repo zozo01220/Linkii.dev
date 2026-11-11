@@ -7,6 +7,7 @@
 @inject NpmProxy Npm
 @inject ResellerResolver Resolver
 @inject AiService AiSvc
+@inject WebImages WebImg
 
 <div class="page-head">
     <div>
@@ -210,6 +211,14 @@
                 <div>L'IA est active pour tous les clients<small>Interrupteur d'urgence : coupe tout, sans rien supprimer ni modifier chez les clients.</small></div>
                 <div class="val"><button type="button" class="switch @(aiOn ? "on" : "")" role="switch" aria-checked="@(aiOn ? "true" : "false")" aria-label="IA active pour tous les clients" @onclick="() => aiOn = !aiOn"><span></span></button></div>
             </div></div>
+        <div class="n-card"><p class="n-cardt">Images d'illustration d'internet</p><p class="n-cardd">Quand l'IA crée une composition et que la médiathèque du client n'a pas d'image qui convienne, elle cherche une photo neutre (objet, lieu, ambiance ; sans personne) dans la banque d'images @WebImages.Provider et l'importe chez lui avec le nom du photographe. Sans clé, rien n'est cherché sur internet. Chaque organisation peut couper la fonction dans ses réglages.</p>
+            <div class="n-fields">
+                <div class="n-f" style="grid-column:1/-1"><label>Clé API @WebImages.Provider</label><input class="mono full" type="password" @bind="webKey" autocomplete="new-password" name="web-images-secret" placeholder="@(hasWebKey ? "Enregistrée : laisser vide pour la conserver" : "Clé gratuite")" aria-label="Clé API de la banque d'images" /><small>Gratuite, à demander sur pexels.com/api : 200 recherches par heure et 20 000 par mois. Photos libres pour un usage commercial ; ne pas les revendre telles quelles.</small></div>
+            </div>
+            <div class="n-test"><button type="button" class="btn ghost" @onclick="TestWeb" disabled="@webTesting">Tester la clé</button>
+                @if (webTest != "") { <span class="adm-st @(webTestOk ? "ok" : "bad")">@webTest</span> }
+                @if (hasWebKey) { <button type="button" class="linklike" style="font-size:13px" @onclick="RemoveWebKey">Retirer la clé</button> }
+                <small>Enregistre les champs avant de tester.</small></div></div>
         <div class="n-card"><p class="n-cardt">Consommation par client</p><p class="n-cardd">La consommation de chaque organisation et son quota particulier se voient dans <a href="admin/clients">Clients</a> (colonne « IA ce mois-ci » et fiche du client).</p></div>
     }
     else if (section == "mail")
@@ -286,6 +295,9 @@
     private decimal aiCap = 25, aiCost;
     private bool aiOn = true, aiTrial = true, hasAiKey, aiTesting, aiTestOk;
     private int aiUsed;   // demandes du mois, toutes organisations
+    // Images d'illustration d'internet (voir WebImages) : clé Pexels de la plateforme
+    private string webKey = "", webTest = "";
+    private bool hasWebKey, webTesting, webTestOk;
 
     // « Enregistrer / Annuler » n'apparaissent que si un champ a changé depuis le chargement ou le dernier enregistrement
     private string savedSig = "";
@@ -293,7 +305,7 @@
     private string Sig() => string.Join("|", trialDays, linkHours, purgeDays, accepted, smtpPort, smtpHost, smtpUser, smtpPassword, smtpFrom, smtpSsl, baseDomain, sepChoice, npmUrl, npmUser, npmPassword, npmScheme, npmForwardHost, npmPort,
         annualPct, commissionPct, priceBase, priceGrowth, feePct, feeFixed, trialPlan, paymentMode, stripeKey, retentionDays, reminderDays, mailFirst, mailTips,
         string.Join(",", codes.Select(c => $"{c.Code}:{c.Days}:{c.Active}")),
-        aiModel, aiKey, aiQuotaPro, aiQuotaTrial, aiCap, aiOn, aiTrial);
+        aiModel, aiKey, aiQuotaPro, aiQuotaTrial, aiCap, aiOn, aiTrial, webKey);
 
     // Essai, conservation, codes, parcours e-mails, paiement (voir Billing, Lifecycle)
     private string trialPlan = Plans.Growth, paymentMode = PaymentModes.Simulation, stripeKey = "", newCode = "";
@@ -355,7 +367,7 @@
         (trialPlan, retentionDays, reminderDays, mailFirst, mailTips, paymentMode, hasStripeKey) = (p.TrialPlan, p.RetentionDays, p.TrialReminderDays, p.MailFirstSteps, p.MailTips, p.PaymentMode, p.StripeSecretKey != "");
         codes = p.TrialCodes.Select(c => new TrialCode { Code = c.Code, Days = c.Days, Active = c.Active, Uses = c.Uses }).ToList();   // copie : rien n'est enregistré avant « Enregistrer »
         simulatedCount = Root.Read(d => d.Payments.Count(x => x.Simulated));
-        aiKey = "";
+        aiKey = ""; webKey = ""; hasWebKey = p.WebImagesKey != "";
         (aiModel, aiQuotaPro, aiQuotaTrial, aiCap, aiOn, aiTrial, hasAiKey) = (Ai.Models.Any(m => m.Id == p.AiModel) ? p.AiModel : Ai.DefaultModel, p.AiQuotaPro, p.AiQuotaTrial, p.AiMonthlyCapUsd, p.AiEnabled, p.AiTrial, p.AiApiKey != "");
         var now = DateTime.UtcNow;
         var month = Ai.Month(now);
@@ -385,6 +397,7 @@
         if (aiQuotaPro is < 0 or > 1_000_000 || aiQuotaTrial is < 0 or > 1_000_000) { Toast.Error("Un quota d'IA doit être compris entre 0 et 1 000 000 de demandes par mois."); return false; }
         if (aiCap is < 0 or > 10000) { Toast.Error("Le plafond de dépense de l'IA doit être compris entre 0 et 10 000 $."); return false; }
         var aiEncrypted = aiKey.Trim() == "" ? null : Box.Protect(aiKey.Trim());
+        var webEncrypted = webKey.Trim() == "" ? null : Box.Protect(webKey.Trim());
         var stripeEncrypted = stripeKey.Trim() == "" ? null : Box.Protect(stripeKey.Trim());
         var encrypted = smtpPassword == "" ? null : Box.Protect(smtpPassword);
         var npmEncrypted = npmPassword == "" ? null : Box.Protect(npmPassword);
@@ -409,8 +422,10 @@
             p.AiEnabled = aiOn; p.AiTrial = aiTrial; p.AiModel = aiModel; p.AiQuotaPro = aiQuotaPro; p.AiQuotaTrial = aiQuotaTrial; p.AiMonthlyCapUsd = Math.Round(aiCap, 2);
             if (aiEncrypted != null) p.AiApiKey = aiEncrypted;
             hasAiKey = p.AiApiKey != "";
+            if (webEncrypted != null) p.WebImagesKey = webEncrypted;
+            hasWebKey = p.WebImagesKey != "";
         });
-        aiKey = "";
+        aiKey = ""; webKey = "";
         smtpPassword = ""; npmPassword = ""; stripeKey = ""; npmReady = Npm.Configured;
         savedSig = Sig();
         if (toast) Toast.Ok("Réglages de la plateforme enregistrés.");
@@ -424,6 +439,22 @@
         (aiTestOk, aiTest) = await AiSvc.Test();
         aiTesting = false;
         Load();
+    }
+
+    private async Task TestWeb()
+    {
+        if (!SaveCore(false)) return;
+        webTesting = true; webTest = "Recherche en cours…"; webTestOk = true; StateHasChanged();
+        (webTestOk, webTest) = await WebImg.Test();
+        webTesting = false;
+    }
+
+    /// <summary>Plus d'images d'internet chez aucun client (les images déjà importées restent dans leur médiathèque).</summary>
+    private void RemoveWebKey()
+    {
+        Root.Write(d => d.Platform.WebImagesKey = "");
+        hasWebKey = false; webTest = "";
+        Toast.Ok("Clé retirée : plus aucune image n'est cherchée sur internet.");
     }
 
     private async Task TestNpm()

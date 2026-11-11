@@ -129,6 +129,8 @@ public class PlatformSettings
     public bool AiTrial { get; set; } = true;
     /// <summary>Plafond de dépense du mois pour toute la plateforme (USD) : atteint, l'IA se met en pause pour tous jusqu'au mois suivant.</summary>
     public decimal AiMonthlyCapUsd { get; set; } = 25m;
+    /// <summary>Clé de la banque d'images Pexels (chiffrée, SecretBox), jamais réaffichée ; vide : pas d'images d'illustration d'internet (voir <see cref="WebImages"/>).</summary>
+    public string WebImagesKey { get; set; } = "";
 }
 
 /// <summary>Consommation d'IA d'une organisation pour un mois (« 2026-11 », UTC) : demandes comptées pour le quota, jetons et coût estimé pour le plafond.</summary>
@@ -482,6 +484,8 @@ public class Tenant
     public bool AiMediaOn { get; set; } = true;
     /// <summary>Assistant : répond d'après l'état des écrans et propose des actions à confirmer (voir <see cref="AiAssistant"/>).</summary>
     public bool AiAssistantOn { get; set; } = true;
+    /// <summary>Images d'illustration d'internet : quand l'IA crée une composition sans image qui convienne dans la médiathèque, elle cherche une photo neutre (voir <see cref="WebImages"/>).</summary>
+    public bool AiWebImagesOn { get; set; } = true;
     /// <summary>Quota mensuel propre à cette organisation (Enterprise, accord particulier) ; null : celui de la console.</summary>
     public int? AiQuota { get; set; }
 
@@ -1121,6 +1125,9 @@ public class MediaItem : IClientOwned, IAreaOwned, IOwned
     public string? AiTemplate { get; set; }
     /// <summary>L'image a été analysée par l'IA.</summary>
     public bool AiDone { get; set; }
+    /// <summary>Image venue d'une banque d'images : « Photo : Jeanne Martin sur Pexels » et la page de la photo (crédit du photographe, voir <see cref="WebImages"/>).</summary>
+    public string? Credit { get; set; }
+    public string? CreditUrl { get; set; }
     public DateTime? AddedUtc { get; set; }
     /// <summary>Dossier de la médiathèque (null : racine de l'aire). Voir <see cref="MediaFolder"/>.</summary>
     public Guid? FolderId { get; set; }

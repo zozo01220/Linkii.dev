@@ -11,6 +11,7 @@
 @inject ModeService Modes
 @inject HistoryLog Hist
 @inject AiService AiSvc
+@inject WebImages WebImg
 
 @* Réglages : navigation latérale groupée, une carte par sujet, un réglage par ligne (libellé à gauche, contrôle à droite).
    Les modifications de toutes les sections s'enregistrent ensemble : la barre du bas n'apparaît qu'après un changement. « Utilisation » et « Compte » n'en ont pas besoin. *@
@@ -244,6 +245,11 @@
                             <div class="ctl"><button type="button" class="switch @(aiMedia ? "on" : "")" role="switch" aria-checked="@(aiMedia ? "true" : "false")" aria-label="Médiathèque intelligente" @onclick="() => { aiMedia = !aiMedia; dirty = true; }"><span></span></button></div></div>
                         <div class="sv-row"><div class="t"><b>Assistant</b><small>Bouton « Assistant » en haut : répond sur l'état des écrans et propose des actions (afficher un message, redémarrer, éteindre l'écran). Rien n'est fait sans confirmation, et il ne publie rien.</small></div>
                             <div class="ctl"><button type="button" class="switch @(aiAssistant ? "on" : "")" role="switch" aria-checked="@(aiAssistant ? "true" : "false")" aria-label="Assistant" @onclick="() => { aiAssistant = !aiAssistant; dirty = true; }"><span></span></button></div></div>
+                        @if (WebImg.Configured)
+                        {
+                            <div class="sv-row"><div class="t"><b>Images d'illustration d'internet</b><small>Quand l'IA crée une composition et que votre médiathèque n'a pas d'image qui convienne, elle cherche une photo neutre (objet, lieu, ambiance ; sans personne) sur @WebImages.Provider et l'ajoute à votre médiathèque avec le nom du photographe.</small></div>
+                                <div class="ctl"><button type="button" class="switch @(aiWeb ? "on" : "")" role="switch" aria-checked="@(aiWeb ? "true" : "false")" aria-label="Images d'illustration d'internet" @onclick="() => { aiWeb = !aiWeb; dirty = true; }"><span></span></button></div></div>
+                        }
                     </div>
                     <div class="rg-card"><header><h3>Consommation @(aiState.Trial ? "de l'essai" : "du mois")</h3><small>@(aiState.Trial ? "Pendant l'essai, " + aiState.Quota.ToString("N0", Fr) + " demandes. Elles se poursuivent avec le plan Pro." : "Plan Pro : " + aiState.Quota.ToString("N0", Fr) + " demandes par mois, remises à zéro le 1er du mois.")</small></header>
                         <div class="rg-body"><div class="ai-q">
@@ -505,7 +511,7 @@
 
     // Mode simple : Utilisation, Veille et luminosité, Compte et confidentialité seulement (le reste est en mode expert).
     private static readonly string[] SimpleTabs = { "utilisation", "veille", "ia", "publicite", "approbation", "abonnement", "compte" };
-    private bool aiWrite = true, aiReview = true, aiMedia = true, aiAssistant = true;   // aide à l'écriture de l'IA (réglage de l'organisation)
+    private bool aiWrite = true, aiReview = true, aiMedia = true, aiAssistant = true, aiWeb = true;   // fonctions de l'IA (réglages de l'organisation)
     private AiState aiState = new(AiStatus.Off, 0, 0, false);
     private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");   // Publicité : une fonction activable, comme la veille
     private int adsPending;   // spots de publicité à valider (pastille de la rubrique)
@@ -573,7 +579,7 @@
         (sleepEnabled, dimEnabled) = (t.SleepEnabled, t.DimEnabled);
         (techPinOn, techPin, techPinLocal, techPinUtc, techPinBy) = (t.TechPinOn, t.TechPin, t.TechPinLocal, t.TechPinUtc, t.TechPinBy);
         autoStart = t.DefaultAutoStart; mergePres = t.MergePresentations;
-        aiWrite = t.AiWriteOn; aiReview = t.AiReviewOn; aiMedia = t.AiMediaOn; aiAssistant = t.AiAssistantOn; aiState = AiSvc.State(t.Id);
+        aiWrite = t.AiWriteOn; aiReview = t.AiReviewOn; aiMedia = t.AiMediaOn; aiAssistant = t.AiAssistantOn; aiWeb = t.AiWebImagesOn; aiState = AiSvc.State(t.Id);
         LoadPinState(t);
         adsPending = Store.Read(d => Ads.PendingCount(d.Root, d.Tenant, DateTime.UtcNow));
         soleAreaId =areaCount == 1 ? Store.Read(d => d.Areas.First().Id) : Guid.Empty;
@@ -695,7 +701,7 @@
             t.DefaultScreenType = spec.Type; t.DefaultOrientation = spec.Orientation; t.DefaultResolution = spec.Resolution;
             mergeNow = mergePres && !t.MergePresentations;
             t.DefaultAutoStart = autoStart; t.MergePresentations = mergePres;
-            if (t.IsGrowth) { Diff("Aide de l'IA", t.AiWriteOn, aiWrite); t.AiWriteOn = aiWrite; Diff("Relecture de l'IA", t.AiReviewOn, aiReview); t.AiReviewOn = aiReview; Diff("Médiathèque intelligente", t.AiMediaOn, aiMedia); t.AiMediaOn = aiMedia; Diff("Assistant IA", t.AiAssistantOn, aiAssistant); t.AiAssistantOn = aiAssistant; }   // IA : licence Pro
+            if (t.IsGrowth) { Diff("Aide de l'IA", t.AiWriteOn, aiWrite); t.AiWriteOn = aiWrite; Diff("Relecture de l'IA", t.AiReviewOn, aiReview); t.AiReviewOn = aiReview; Diff("Médiathèque intelligente", t.AiMediaOn, aiMedia); t.AiMediaOn = aiMedia; Diff("Assistant IA", t.AiAssistantOn, aiAssistant); t.AiAssistantOn = aiAssistant; Diff("Images d'illustration d'internet", t.AiWebImagesOn, aiWeb); t.AiWebImagesOn = aiWeb; }   // IA : licence Pro
             if (t.IsGrowth)   // alertes et pause : licence Pro (contrôlée ici aussi, pas seulement dans l'interface)
             {
                 t.AlertsOn = alertsOn; t.AlertMail = alertMail; t.AlertPush = alertPush; t.AlertGood = alertGood;

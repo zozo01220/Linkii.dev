@@ -15,6 +15,12 @@ public record AiRun(string? Error, string? Info = null, Func<Task<string?>>? Und
 /// <summary>Réponse de l'assistant : une phrase, des actions à confirmer, un lien éventuel vers la page concernée.</summary>
 public record AiAnswer(bool Ok, string Say, List<AiAction> Actions, string? Link, string? LinkLabel, string Message);
 
+/// <summary>Étapes d'une demande à l'assistant, dans l'ordre : lire l'organisation, attendre l'IA, recevoir sa réponse, contrôler les actions.</summary>
+public enum AiStep { Reading, Thinking, Writing, Checking }
+
+/// <summary>Où en est une demande : l'étape, ce qui a été lu, le début de la réponse et les sortes d'actions déjà annoncées par l'IA.</summary>
+public record AiProgress(AiStep Step, string Read, string Say, IReadOnlyList<string> Ops);
+
 /// <summary>
 /// Assistant (Pro) : la personne écrit ce qu'elle veut savoir ou faire ; l'IA répond d'après l'état de son organisation (écrans, listes, compositions, médias, calendriers,
 /// historique récent) et propose des actions que la personne confirme une à une. Le contexte de la conversation est gardé par la fenêtre et renvoyé à chaque demande.
@@ -25,7 +31,7 @@ public record AiAnswer(bool Ok, string Say, List<AiAction> Actions, string? Link
 /// de liste attend le bouton « Publier » (les calendriers, eux, s'appliquent tout de suite comme sur leur page).
 /// </summary>
 public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCompose compose, AiReview review, NoticeService notices, DeviceCommandService commands,
-    ScreenControl control, Notifier notifier, AppService apps, MediaLibrary library, HistoryLog history, ILogger<AiAssistant> log)
+    ScreenControl control, Notifier notifier, AppService apps, MediaLibrary library, HistoryLog history, WebImages webImages, ILogger<AiAssistant> log)
 {
     private const int MaxActions = 25, MaxChars = 600;
     private static readonly string[] Commands = { "restart-player", "screen-off", "wake", "reboot" };
@@ -49,7 +55,9 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         - list_add {list,content:"C1" ou "M1",seconds} · list_remove {list,item} · list_move {list,item,to} · list_duration {list,item (ou "all"),seconds} · list_transition {list,item (ou "all"),transition:cut|fade|push-left|push-right|push-up|push-down|zoom} · list_toggle {list,item,on:true|false}
         IMAGES ET COMPOSITIONS
         - media_rename {media,name} · media_describe {media,description,tags:[...]} · media_analyze {media} (l'IA décrit l'image)
-        - composition_create {sentence,portrait:false,list:"L1" ou null} (crée une composition depuis une phrase) · text_replace {composition,find,replace} (remplace du texte exact dans une composition)
+        - composition_create {sentence,portrait:false,list:"L1" ou null,photo:"auto"} (crée une composition depuis une phrase ; « photo » : "M1" pour une image précise de la médiathèque, "auto" pour qu'elle choisisse une image qui convient, sinon une photo neutre d'internet si c'est disponible, "web" pour une photo d'internet, null pour aucune image)
+        - web_image {query,portrait:false} (cherche sur internet une photo d'illustration neutre, sans personne, et l'ajoute à la médiathèque ; « query » : 2 à 4 mots en français ; seulement si « Images d'internet : disponibles »)
+        - text_replace {composition,find,replace} (remplace du texte exact dans une composition)
         - text_fix {target:"C1" ou "L1",mode:correct|improve|formal|warm|short} (corrige ou reformule les textes d'une composition, ou de toutes les compositions d'une liste)
         PLANNING ET RÉGLAGES
         - calendar_create {name,list,ref:"NK1"} (« list » : liste jouée hors des événements) · calendar_event {calendar,kind:play|off,list,days:[1..7 lundi=1] (absent : tous les jours),from:"HH:mm",to:"HH:mm",always:false} · calendar_assign {screens,calendar:"K1"}
@@ -67,8 +75,9 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
 
     // ---------- Contexte ----------
 
+    /// <summary>Ce que l'IA a vu (repères → identifiants) ; <paramref name="Web"/> : l'organisation peut recevoir des images d'internet.</summary>
     private record Ctx(Dictionary<string, Guid> Screens, Dictionary<string, Guid> Lists, Dictionary<string, List<Guid>> Items, Dictionary<string, Guid> Comps,
-        Dictionary<string, Guid> Media, Dictionary<string, Guid> Cals, Dictionary<Guid, string> Names, string Text);
+        Dictionary<string, Guid> Media, Dictionary<string, Guid> Cals, Dictionary<Guid, string> Names, string Text, bool Web);
 
     private Ctx Context(string request)
     {
@@ -77,6 +86,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         var now = DateTime.UtcNow;
         var cid = store.ClientId;
         var past = history.Read(cid, now.AddDays(-3)).Where(e => e.Channel != History.Diag).Take(8).ToList();
+        var web = webImages.On(cid);
         return store.Read(d =>
         {
             var t = d.Tenant;
@@ -136,6 +146,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 sb.Append($"{key} · {m.Name}{(m.AiDesc is { Length: > 0 } ds ? " · " + Cut(ds, 110) : "")}{(m.AiTags.Count > 0 ? " · mots-clés : " + string.Join(", ", m.AiTags.Take(6)) : "")}\n");
             }
             if (n2 == 0) sb.Append("(aucune image)\n");
+            sb.Append(web ? $"Images d'internet : disponibles (photos neutres de {WebImages.Provider}, ajoutées à la médiathèque)\n" : "Images d'internet : non disponibles\n");
 
             sb.Append("\nCalendriers de programmation :\n");
             var q = 0;
@@ -151,7 +162,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
 
             sb.Append($"\nAlerte « écran hors ligne » après {t.AlertOfflineMinutes} minute(s).\n");
             if (past.Count > 0) sb.Append("\nHistorique récent :\n" + string.Join("\n", past.Select(e => $"{e.AtUtc.ToLocalTime():dd.MM HH:mm} · {e.Title}{(e.Actor is { Length: > 0 } a ? " (" + a + ")" : "")}")) + "\n");
-            return new Ctx(screens, lists, items, comps, media, cals, names, sb.ToString());
+            return new Ctx(screens, lists, items, comps, media, cals, names, sb.ToString(), web);
         });
     }
 
@@ -165,15 +176,35 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
 
     // ---------- Demande ----------
 
-    public async Task<AiAnswer> Ask(string request, string conversation, CancellationToken ct = default)
+    /// <summary>
+    /// Traite une demande. <paramref name="progress"/> (facultatif) est appelé à chaque étape, puis à chaque morceau de la réponse reçue :
+    /// la fenêtre montre ainsi ce qui se passe au lieu de faire attendre sans rien dire.
+    /// </summary>
+    public async Task<AiAnswer> Ask(string request, string conversation, CancellationToken ct = default, Action<AiProgress>? progress = null)
     {
         request = (request ?? "").Trim();
         if (request.Length < 2) return Fail("Écrivez ce que vous voulez faire ou savoir.");
         if (request.Length > MaxChars) return Fail("Cette demande est trop longue : une ou deux phrases suffisent.");
+        var none = Array.Empty<string>();
+        progress?.Invoke(new AiProgress(AiStep.Reading, "", "", none));
         var ctx = Context(request + " " + conversation);
+        var read = ReadSummary(ctx);
+        progress?.Invoke(new AiProgress(AiStep.Thinking, read, "", none));
         var prompt = ctx.Text + (conversation.Length > 0 ? "\nConversation jusqu'ici :\n" + conversation + "\n" : "") + "\nNouvelle demande : " + request;
-        var r = await ai.Complete(store.ClientId, "assistant", System, new UserMessageParam { Content = prompt }, 2500, ct);
+        var buf = new StringBuilder();
+        var said = ""; var seen = 0;
+        var r = await ai.CompleteStreaming(store.ClientId, "assistant", System, new UserMessageParam { Content = prompt }, 2500, chunk =>
+        {
+            buf.Append(chunk);
+            if (progress == null) return;
+            var text = buf.ToString();
+            var say = PartialSay(text); var ops = OpsSoFar(text);
+            if (say == said && ops.Count == seen && buf.Length != chunk.Length) return;   // rien de neuf à montrer
+            said = say; seen = ops.Count;
+            progress(new AiProgress(AiStep.Writing, read, say, ops));
+        }, ct);
         if (!r.Ok) return Fail(r.Message);
+        progress?.Invoke(new AiProgress(AiStep.Checking, read, PartialSay(r.Text), OpsSoFar(r.Text)));
         var a = r.Text.IndexOf('{'); var b = r.Text.LastIndexOf('}');
         if (a < 0 || b <= a) return Fail("L'assistant n'a pas compris cette demande. Reformulez-la.");
         try
@@ -195,6 +226,78 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
     }
 
     private static AiAnswer Fail(string msg) => new(false, "", new(), null, null, msg);
+
+    // ---------- Suivi de la demande (réponse reçue au fil de l'eau) ----------
+
+    private static readonly Regex SayStart = new("\"say\"\\s*:\\s*\"", RegexOptions.Compiled);
+    private static readonly Regex OpField = new("\"op\"\\s*:\\s*\"([a-z_]+)\"", RegexOptions.Compiled);
+
+    /// <summary>« 3 écrans, 4 listes, 2 compositions… » : ce que l'assistant a lu de l'organisation avant d'interroger l'IA.</summary>
+    private static string ReadSummary(Ctx c)
+    {
+        static string N(int n, string one, string many) => n == 1 ? "1 " + one : n + " " + many;
+        var parts = new List<string>();
+        if (c.Screens.Count > 0) parts.Add(N(c.Screens.Count, "écran", "écrans"));
+        if (c.Lists.Count > 0) parts.Add(N(c.Lists.Count, "liste", "listes"));
+        if (c.Comps.Count > 0) parts.Add(N(c.Comps.Count, "composition", "compositions"));
+        if (c.Media.Count > 0) parts.Add(N(c.Media.Count, "image", "images"));
+        if (c.Cals.Count > 0) parts.Add(N(c.Cals.Count, "calendrier", "calendriers"));
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>Le début de la phrase « say » d'une réponse JSON encore incomplète (échappements décodés ; un échappement coupé en route est laissé de côté).</summary>
+    public static string PartialSay(string json)
+    {
+        var m = SayStart.Match(json ?? "");
+        if (!m.Success) return "";
+        var sb = new StringBuilder();
+        for (var i = m.Index + m.Length; i < json!.Length; i++)
+        {
+            var ch = json[i];
+            if (ch == '"') break;
+            if (ch != '\\') { sb.Append(ch); continue; }
+            if (i + 1 >= json.Length) break;
+            var e = json[++i];
+            switch (e)
+            {
+                case 'n': sb.Append('\n'); break;
+                case 't': sb.Append(' '); break;
+                case 'r': break;
+                case 'u':
+                    if (i + 4 < json.Length && int.TryParse(json.AsSpan(i + 1, 4), global::System.Globalization.NumberStyles.HexNumber, null, out var code)) { sb.Append((char)code); i += 4; }
+                    else i = json.Length;
+                    break;
+                default: sb.Append(e); break;   // \" \\ \/
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>Les sortes d'actions déjà annoncées dans une réponse incomplète, dans l'ordre (libellés généraux : les détails ne sont contrôlés qu'à la fin).</summary>
+    public static List<string> OpsSoFar(string json) => OpField.Matches(json ?? "").Select(m => OpLabel(m.Groups[1].Value)).OfType<string>().ToList();
+
+    public static string? OpLabel(string op) => op switch
+    {
+        "show_message" => "Afficher un message", "clear_message" => "Retirer un message", "command" => "Commande sur un écran",
+        "screen_pause" => "Mettre un écran en pause", "screen_resume" => "Reprendre la diffusion", "screen_rename" => "Renommer un écran",
+        "screen_set_list" => "Choisir la liste d'un écran", "screen_param" => "Régler une variable d'écran", "band_text" => "Écrire un bandeau", "band_off" => "Retirer un bandeau",
+        "list_create" => "Créer une liste", "list_rename" => "Renommer une liste", "list_duplicate" => "Dupliquer une liste", "list_review" => "Relire une liste",
+        "list_add" => "Ajouter à une liste", "list_remove" => "Retirer d'une liste", "list_move" => "Déplacer un contenu", "list_duration" => "Changer une durée",
+        "list_transition" => "Changer une transition", "list_toggle" => "Activer ou désactiver un contenu",
+        "media_rename" => "Renommer une image", "media_describe" => "Décrire une image", "media_analyze" => "Faire décrire une image",
+        "composition_create" => "Créer une composition", "web_image" => "Chercher une photo sur internet", "text_replace" => "Remplacer un texte", "text_fix" => "Corriger des textes",
+        "calendar_create" => "Créer un calendrier", "calendar_event" => "Ajouter un créneau au calendrier", "calendar_assign" => "Assigner un calendrier",
+        "alert_delay" => "Régler l'alerte hors ligne",
+        _ => null,
+    };
+
+    /// <summary>Ce qu'on dit d'une action longue pendant qu'elle tourne (elle interroge l'IA ou internet) ; null pour une action rapide.</summary>
+    public static string? SlowHint(string op) => op switch
+    {
+        "composition_create" or "text_fix" or "media_analyze" or "list_review" => "l'IA travaille, cela peut prendre jusqu'à une minute",
+        "web_image" => "recherche sur internet, quelques secondes",
+        _ => null,
+    };
 
     private static (string?, string?) Link(string? open, Ctx ctx)
     {
@@ -395,7 +498,20 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 if (sentence.Length < 4) yield break;
                 var portrait = x["portrait"] is JsonValue v && v.TryGetValue<bool>(out var pb) && pb;
                 var l = List();
-                yield return Act($"Créer une composition « {Cut(sentence, 60)} »{(portrait ? " (portrait)" : "")}{(l != null ? $" et l'ajouter à « {N(l.Value)} »" : "")}", ("sentence", sentence), ("portrait", portrait.ToString()), ("l", l?.ToString() ?? ""));
+                // photo : absente = "auto" ; null = aucune ; "M1" = cette image ; "web" = photo d'internet (si l'organisation y a droit)
+                var raw = !x.ContainsKey("photo") ? "auto" : Str(x, "photo")?.Trim() ?? "";
+                var photo = Ref("photo", c.Media) is { } pm ? pm.ToString() : raw == "web" ? (c.Web ? "web" : "") : raw == "auto" || raw.StartsWith('M') ? "auto" : "";
+                var extra = Guid.TryParse(photo, out var pg) ? $" avec l'image « {N(pg)} »" : photo == "web" ? " avec une photo d'internet" : photo == "auto" ? " (avec une image si l'une convient)" : "";
+                yield return Act($"Créer une composition « {Cut(sentence, 60)} »{(portrait ? " (portrait)" : "")}{extra}{(l != null ? $" et l'ajouter à « {N(l.Value)} »" : "")}",
+                    ("sentence", sentence), ("portrait", portrait.ToString()), ("l", l?.ToString() ?? ""), ("photo", photo));
+                break;
+            }
+            case "web_image":
+            {
+                var q = Cut(Str(x, "query"), 60);
+                if (!c.Web || q.Length < 2) yield break;
+                var portrait = x["portrait"] is JsonValue v && v.TryGetValue<bool>(out var pb) && pb;
+                yield return Act($"Chercher sur internet une photo neutre « {q} »{(portrait ? " (en hauteur)" : "")} et l'ajouter à la médiathèque", ("query", q), ("portrait", portrait.ToString()));
                 break;
             }
             case "text_replace":
@@ -569,6 +685,14 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                     return new(r.Ok ? null : r.Message, r.Ok ? "Image décrite : voir sa fiche dans la médiathèque." : null);
                 }
                 case "composition_create": return await ComposeNew(a, ct);
+                case "web_image":
+                {
+                    if (!Can(LevelPages.Media)) return new(NoRight);
+                    var before = DateTime.UtcNow.AddSeconds(-1);
+                    var (item, err) = await webImages.FindAndImport(cid, a.A["query"], a.A["portrait"] == "True", store.AreaId, uid, ct);
+                    if (item == null) return new(err ?? "Aucune image trouvée.");
+                    return new(null, item.AddedUtc < before ? $"Cette photo est déjà dans la médiathèque : « {item.Name} ». {item.Credit}." : $"Image « {item.Name} » ajoutée à la médiathèque. {item.Credit}.");
+                }
                 case "text_replace": return TextReplace(a);
                 case "text_fix": return await TextFix(a, ct);
                 case "calendar_create":
@@ -714,13 +838,21 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
 
     private async Task<AiRun> ComposeNew(AiAction a, CancellationToken ct)
     {
-        var r = await compose.FromSentence(store.ClientId, a.A["sentence"], a.A["portrait"] == "True", ct);
+        // photo : "" aucune, "auto" (médiathèque puis internet), "web" (internet seulement), ou l'identifiant d'une image choisie
+        var mode = a.A.GetValueOrDefault("photo") ?? "";
+        ComposePhotos? photos = null;
+        if (mode.Length > 0)
+        {
+            photos = AiCompose.PhotosFor(store, webImages, a.A["sentence"], Guid.TryParse(mode, out var chosen) ? chosen : null, mode is "auto" or "web");
+            if (mode == "web") photos = photos with { Library = Array.Empty<(Guid, string)>(), Wanted = true };
+        }
+        var r = await compose.FromSentence(store.ClientId, a.A["sentence"], a.A["portrait"] == "True", ct, photos);
         if (!r.Ok) return new(r.Message);
         var slide = r.Slides[0];
         if (Compositions.Clean(slide.Doc) is not { } c) return new("La composition n'a pas pu être préparée.");
         var (item, errors) = apps.SaveInstance(Compositions.AppId, null, slide.Name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
         if (item == null) return new(string.Join(" ", errors));
-        var info = "Composition créée.";
+        var info = r.Photo != null ? $"Composition créée avec une image ({r.Photo})." : "Composition créée.";
         if (Guid.TryParse(a.A["l"], out var lid))
         {
             var ok = store.Write(d =>

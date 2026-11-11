@@ -191,40 +191,89 @@ public class AiService(JsonStore root, SecretBox box, ILogger<AiService> log, IC
     /// </summary>
     public async Task<AiResult> Complete(Guid clientId, string feature, string system, UserMessageParam user, int maxTokens, CancellationToken ct = default)
     {
-        var state = State(clientId, feature);
-        if (!state.Available) return new AiResult(false, "", Say(state));
-        if (!Allow(clientId)) return new AiResult(false, "", "Un instant, réessayez dans quelques secondes.");
-
-        var (stored, model) = root.Read(d => (d.Platform.AiApiKey, d.Platform.AiModel));
-        string key;
-        try { key = box.Unprotect(stored); }
-        catch (Exception e) { log.LogWarning(e, "Clé d'IA illisible sur ce serveur."); return new AiResult(false, "", Unavailable); }
-
+        var (fail, key, model) = Begin(clientId, feature);
+        if (fail != null) return fail;
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(feature is "review" or "compose" ? 90 : 40));
-            var res = await ClientFor(key).Messages.Create(new MessageCreateParams
-            {
-                Model = model,
-                MaxTokens = maxTokens,
-                System = system,
-                Messages = [user],
-                Thinking = Ai.ThinkingFor(model),
-                OutputConfig = new OutputConfig { Effort = Effort.Low },
-            }, cancellationToken: cts.Token);
+            var res = await ClientFor(key).Messages.Create(Params(model, maxTokens, system, user), cancellationToken: cts.Token);
 
             var answer = string.Concat(res.Content.Select(b => b.Value).OfType<TextBlock>().Select(b => b.Text)).Trim();
             Record(clientId, model, res.Usage.InputTokens, res.Usage.OutputTokens);
             return new AiResult(true, answer, "");
         }
-        catch (OperationCanceledException) { return new AiResult(false, "", "L'IA met trop de temps à répondre. Réessayez dans un instant."); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return new AiResult(false, "", Stopped); }
+        catch (OperationCanceledException) { return new AiResult(false, "", TooLong); }
         catch (Exception e)
         {
             log.LogWarning(e, "Appel à l'IA refusé ou en échec.");
             return new AiResult(false, "", Unavailable);
         }
     }
+
+    public const string Stopped = "Demande arrêtée.";
+    private const string TooLong = "L'IA met trop de temps à répondre. Réessayez dans un instant.";
+
+    /// <summary>
+    /// Comme <see cref="Complete"/>, mais la réponse arrive au fil de l'eau : <paramref name="onText"/> reçoit chaque morceau de texte, pour que l'interface
+    /// montre où en est la demande (assistant). Une demande arrêtée par la personne compte ce qui a déjà été produit.
+    /// </summary>
+    public async Task<AiResult> CompleteStreaming(Guid clientId, string feature, string system, UserMessageParam user, int maxTokens, Action<string> onText, CancellationToken ct = default)
+    {
+        var (fail, key, model) = Begin(clientId, feature);
+        if (fail != null) return fail;
+        var sb = new System.Text.StringBuilder();
+        long input = 0, output = 0;
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            await foreach (var ev in ClientFor(key).Messages.CreateStreaming(Params(model, maxTokens, system, user), cancellationToken: cts.Token))
+            {
+                if (ev.TryPickStart(out var start)) input = start.Message.Usage.InputTokens;
+                else if (ev.TryPickContentBlockDelta(out var delta) && delta.Delta.TryPickText(out var text))
+                {
+                    sb.Append(text.Text);
+                    try { onText(text.Text); } catch (Exception e) { log.LogDebug(e, "Suivi de la demande d'IA en échec."); }   // l'affichage ne coupe jamais la demande
+                }
+                else if (ev.TryPickDelta(out var md)) output = md.Usage.OutputTokens;
+            }
+            return new AiResult(true, sb.ToString().Trim(), "");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return new AiResult(false, "", Stopped); }
+        catch (OperationCanceledException) { return new AiResult(false, "", TooLong); }
+        catch (Exception e)
+        {
+            log.LogWarning(e, "Appel à l'IA refusé ou en échec.");
+            return new AiResult(false, "", Unavailable);
+        }
+        finally
+        {
+            if (input > 0 || sb.Length > 0) Record(clientId, model, input, Math.Max(output, sb.Length / 4));   // arrêtée en route : ce qui a été produit compte quand même
+        }
+    }
+
+    /// <summary>Contrôles d'avant demande (état, cadence) et clé déchiffrée ; <c>Fail</c> non nul : la demande ne part pas.</summary>
+    private (AiResult? Fail, string Key, string Model) Begin(Guid clientId, string feature)
+    {
+        var state = State(clientId, feature);
+        if (!state.Available) return (new AiResult(false, "", Say(state)), "", "");
+        if (!Allow(clientId)) return (new AiResult(false, "", "Un instant, réessayez dans quelques secondes."), "", "");
+        var (stored, model) = root.Read(d => (d.Platform.AiApiKey, d.Platform.AiModel));
+        try { return (null, box.Unprotect(stored), model); }
+        catch (Exception e) { log.LogWarning(e, "Clé d'IA illisible sur ce serveur."); return (new AiResult(false, "", Unavailable), "", ""); }
+    }
+
+    private static MessageCreateParams Params(string model, int maxTokens, string system, UserMessageParam user) => new()
+    {
+        Model = model,
+        MaxTokens = maxTokens,
+        System = system,
+        Messages = [user],
+        Thinking = Ai.ThinkingFor(model),
+        OutputConfig = new OutputConfig { Effort = Effort.Low },
+    };
 
     /// <summary>Console : envoie une toute petite demande pour vérifier la clé et le modèle (compte une demande de la plateforme, pas d'une organisation).</summary>
     public async Task<(bool Ok, string Message)> Test()

@@ -2,9 +2,14 @@
 @inject AiAssistant Assistant
 @inject TenantStore Store
 @inject NavigationManager Nav
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IDisposable
 
 @* Assistant : on écrit ce qu'on veut savoir ou faire, il répond d'après l'état de l'organisation et propose des actions. Rien ne part sans « Confirmer » :
-   les actions sont cochées une à une, et celles qui peuvent se défaire ont leur « Annuler ». La conversation est gardée : on enchaîne (« et sur l'autre écran aussi »). *@
+   les actions sont cochées une à une, et celles qui peuvent se défaire ont leur « Annuler ». La conversation est gardée : on enchaîne (« et sur l'autre écran aussi »).
+   Suivi : pendant la demande, les étapes (lecture, IA, réponse reçue au fil de l'eau, vérification), le temps écoulé et « Arrêter » ;
+   pendant l'exécution, l'action en cours, celles en attente et une barre « Action 2 sur 5 ». *@
 <div class="modal-backdrop" @onclick="Close"></div>
 <div class="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="aia-title" style="width:min(640px, calc(100vw - 32px))">
     <h3 id="aia-title" style="display:flex;align-items:center;gap:8px"><Ico Name="spark" Size="18" /> <span>Assistant</span>
@@ -25,18 +30,31 @@
             {
                 var turn = turns[t];
                 var last = t == turns.Count - 1;
-                <div style="justify-self:end;max-width:88%;background:var(--row);border-radius:10px;padding:8px 12px">@turn.Ask</div>
+                <div id="@(last ? "aia-q" : null)" style="justify-self:end;max-width:88%;background:var(--row);border-radius:10px;padding:8px 12px">@turn.Ask</div>
                 @if (turn.Answer is { } ans)
                 {
                     <div class="ai-sug" style="margin:0" role="region" aria-label="Réponse de l'assistant">
                         <p class="ai-sug-t" style="margin:0">@ans.Say</p>
+                        @if (last && turn.RunTotal > 0)
+                        {
+                            var fin = turn.RunDone;
+                            if (running)
+                            {
+                                <div class="ai-run" role="status"><span>Action @Math.Min(fin + 1, turn.RunTotal) sur @turn.RunTotal</span><span class="ai-run-bar"><i style="width:@(fin * 100 / turn.RunTotal)%"></i></span></div>
+                            }
+                            else
+                            {
+                                var failed = turn.Done.Values.Count(x => x.Error != null);
+                                <div id="aia-sum" class="ai-run @(failed > 0 ? "bad" : "ok")" role="status"><Ico Name="@(failed > 0 ? "alert" : "check")" Size="15" /><span>@RunSummary(turn.Done.Count - failed, failed)</span></div>
+                            }
+                        }
                         @if (ans.Actions.Count > 0)
                         {
                             <ul style="list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px">
                                 @for (var k = 0; k < ans.Actions.Count; k++)
                                 {
                                     var i = k;
-                                    <li style="display:flex;gap:10px;align-items:flex-start">
+                                    <li id="@(last && turn.Running == i ? "aia-run" : null)" style="display:flex;gap:10px;align-items:flex-start">
                                         @if (turn.Done.TryGetValue(i, out var res))
                                         {
                                             @if (res.Error == null) { <span style="color:#1E8E5A;flex:none"><Ico Name="check" Size="16" /></span> }
@@ -48,6 +66,22 @@
                                                 @if (res.Error == null && res.Undo != null && !turn.Undone.Contains(i)) { <button type="button" class="linklike" style="font-size:13px" disabled="@running" @onclick="() => Undo(turn, i)">Annuler</button> }
                                                 @if (turn.Undone.Contains(i)) { <small style="display:block;color:var(--muted)">Annulé.</small> }
                                             </span>
+                                        }
+                                        else if (last && running && turn.Picked.Contains(i))
+                                        {
+                                            @if (turn.Running == i)
+                                            {
+                                                <i class="ai-spin" style="margin-top:2px"></i>
+                                                <span>
+                                                    @ans.Actions[i].Label
+                                                    <small style="display:block;color:#1F5D99">En cours · @Seconds(actionStarted) s@(AiAssistant.SlowHint(ans.Actions[i].Op) is { } hint ? " · " + hint : "")</small>
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <i class="ai-wait"></i>
+                                                <span style="color:var(--muted)">@ans.Actions[i].Label <small style="display:block">En attente</small></span>
+                                            }
                                         }
                                         else if (last)
                                         {
@@ -65,7 +99,34 @@
                     </div>
                 }
             }
-            @if (busy) { <div class="ai-sug loading" role="status"><Ico Name="spark" Size="15" /><span>L'assistant réfléchit</span><span class="ai-dots"><i></i><i></i><i></i></span></div> }
+            @if (busy)
+            {
+                <div style="justify-self:end;max-width:88%;background:var(--row);border-radius:10px;padding:8px 12px">@asking</div>
+                <div class="ai-sug ai-prog" role="status" aria-label="Avancement de la demande">
+                    <div class="ai-prog-h"><Ico Name="spark" Size="15" /><b>@Headline</b><span class="ai-prog-t">@Seconds(started) s</span><span class="grow"></span>
+                        <button type="button" class="linklike" style="font-size:13px" disabled="@(stop == null || stop.IsCancellationRequested)" @onclick="Stop">Arrêter</button></div>
+                    <ol class="ai-steps">
+                        @foreach (var (s, label) in Steps)
+                        {
+                            var st = StepState(s);
+                            <li class="@st">
+                                <span class="ai-step-i">@if (st == "done") { <Ico Name="check" Size="12" /> } else if (st == "now") { <i class="ai-spin"></i> }</span>
+                                <span class="ai-step-b">
+                                    <span>@label@if (s == AiStep.Writing && progress is { Ops.Count: > 0 } po) { <text> · @(po.Ops.Count == 1 ? "1 action repérée" : po.Ops.Count + " actions repérées")</text> }</span>
+                                    @if (s == AiStep.Reading && progress is { Read.Length: > 0 } pr) { <small>@pr.Read</small> }
+                                    @if (s == AiStep.Thinking && st == "now" && Seconds(started) >= 15) { <small>Un peu plus long que d'habitude : la réponse arrive en général en moins de 30 secondes.</small> }
+                                    @if (s == AiStep.Writing && progress is { Say.Length: > 0 } ps) { <span class="ai-say">@ps.Say</span> }
+                                    @if (s == AiStep.Writing && progress is { Ops.Count: > 0 } pg)
+                                    {
+                                        <ul class="ai-ops">@foreach (var g in pg.Ops.GroupBy(x => x)) { <li>@g.Key@(g.Count() > 1 ? $" × {g.Count()}" : "")</li> }</ul>
+                                    }
+                                </span>
+                            </li>
+                        }
+                    </ol>
+                </div>
+            }
+            <div id="aia-end" style="height:1px"></div>
         </div>
 
         @if (turns.Count == 0)
@@ -85,7 +146,7 @@
             <button class="btn ghost" @onclick="Close" disabled="@running">Fermer</button>
             @if (Pending > 0)
             {
-                <button class="btn" disabled="@(running || busy || Picked == 0)" @onclick="Confirm">@if (running) { <span>En cours</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="check" Size="15" /> <span>Confirmer (@Picked)</span> }</button>
+                <button class="btn" disabled="@(running || busy || Picked == 0)" @onclick="Confirm">@if (running && Current is { } cur) { <span>En cours (@Math.Min(cur.RunDone + 1, cur.RunTotal)/@cur.RunTotal)</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="check" Size="15" /> <span>Confirmer (@Picked)</span> }</button>
             }
             <button class="btn @(Pending > 0 ? "ghost" : "")" disabled="@(busy || running || text.Trim().Length < 2)" @onclick="Send"><Ico Name="spark" Size="15" /> <span>Demander</span></button>
         </div>
@@ -102,7 +163,18 @@
         public AiAnswer? Answer;
         public readonly HashSet<int> Picked = new(), Undone = new();
         public readonly Dictionary<int, AiRun> Done = new();
+        /// <summary>Exécution en cours : l'action qui tourne, combien sont prévues et combien sont finies (barre « Action 2 sur 5 »).</summary>
+        public int? Running;
+        public int RunTotal, RunDone;
     }
+
+    private static readonly (AiStep Step, string Label)[] Steps =
+    {
+        (AiStep.Reading, "Lecture de vos écrans, listes et contenus"),
+        (AiStep.Thinking, "Envoi à l'IA et réflexion"),
+        (AiStep.Writing, "Réception de la réponse"),
+        (AiStep.Checking, "Vérification des actions proposées"),
+    };
 
     private static readonly string[] Examples =
     {
@@ -115,8 +187,13 @@
     private AiState state = new(AiStatus.Off, 0, 0, false);
     private string text = "";
     private string? error;
-    private bool busy, running;
+    private bool busy, running, gone;
     private readonly List<Turn> turns = new();
+    // suivi de la demande en cours
+    private string asking = "";
+    private AiProgress? progress;
+    private DateTime started, actionStarted, lastPaint;
+    private CancellationTokenSource? stop;
 
     private Turn? Current => turns.Count > 0 ? turns[^1] : null;
     private int Pending => Current?.Answer is { } a ? a.Actions.Count - Current.Done.Count : 0;
@@ -124,7 +201,67 @@
 
     protected override void OnInitialized() => state = AiSvc.State(Store.ClientId, "assistant");
 
+    /// <summary>
+    /// Élément à amener en vue au prochain rendu, pour que la personne voie toujours où on en est : le suivi de la demande (« aia-end », en bas),
+    /// la dernière demande quand la réponse arrive (« aia-q », pour la lire depuis son début), l'action en cours (« aia-run »), puis le bilan (« aia-sum »).
+    /// </summary>
+    private string? reveal;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (reveal is not { } id || gone) return;
+        reveal = null;
+        try { await JS.InvokeVoidAsync("linkiiPrefs.reveal", id); }
+        catch (JSException) { } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }
+    }
+
     private void Close() { if (!running) OnClose.InvokeAsync(); }
+
+    /// <summary>Fenêtre fermée pendant une demande : la demande est arrêtée (sa réponse serait perdue) et l'horloge s'arrête.</summary>
+    public void Dispose() { gone = true; try { stop?.Cancel(); } catch (ObjectDisposedException) { } }
+
+    private void Stop() { try { stop?.Cancel(); } catch (ObjectDisposedException) { } }
+
+    private static int Seconds(DateTime from) => Math.Max(0, (int)(DateTime.UtcNow - from).TotalSeconds);
+
+    private string Headline => progress?.Step switch
+    {
+        AiStep.Thinking => "L'IA réfléchit à votre demande",
+        AiStep.Writing => "L'IA répond",
+        AiStep.Checking => "Vérification des actions",
+        _ => "Lecture de votre organisation",
+    };
+
+    /// <summary>« done », « now » ou « todo » pour une étape, d'après l'étape en cours.</summary>
+    private string StepState(AiStep s)
+    {
+        var cur = progress?.Step ?? AiStep.Reading;
+        return s < cur ? "done" : s == cur ? "now" : "todo";
+    }
+
+    private static string RunSummary(int ok, int failed) =>
+        failed == 0 ? (ok == 1 ? "Terminé : 1 action faite." : $"Terminé : {ok} actions faites.")
+        : ok == 0 ? (failed == 1 ? "L'action n'a pas pu être faite." : $"Aucune des {failed} actions n'a pu être faite.")
+        : $"Terminé : {ok} faite{(ok > 1 ? "s" : "")}, {failed} en échec.";
+
+    /// <summary>Redessine au plus toutes les 120 ms pendant que la réponse arrive (elle arrive par petits morceaux).</summary>
+    private void Paint()
+    {
+        var now = DateTime.UtcNow;
+        if (gone || now - lastPaint < TimeSpan.FromMilliseconds(120)) return;
+        lastPaint = now;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Horloge : le temps écoulé avance chaque seconde tant qu'une demande ou une exécution est en cours.</summary>
+    private async Task Tick()
+    {
+        while (!gone && (busy || running))
+        {
+            await Task.Delay(1000);
+            if (!gone && (busy || running)) await InvokeAsync(StateHasChanged);
+        }
+    }
     private void Reset() { turns.Clear(); text = ""; error = null; }
 
     private async Task Key(KeyboardEventArgs e) { if (e.Key == "Enter" && !e.ShiftKey && !busy && text.Trim().Length >= 2) await Send(); }
@@ -147,19 +284,26 @@
     private async Task Send()
     {
         var ask = text.Trim();
-        busy = true; error = null;
+        busy = true; error = null; asking = ask; progress = null; started = DateTime.UtcNow; reveal = "aia-end";
+        stop = new CancellationTokenSource();
         StateHasChanged();
+        _ = Tick();
         try
         {
-            var r = await Assistant.Ask(ask, Conversation());
+            var r = await Assistant.Ask(ask, Conversation(), stop.Token, p =>
+            {
+                if (p.Step != progress?.Step || p.Ops.Count != progress.Ops.Count) reveal = "aia-end";   // nouvelle étape ou nouvelle action : la garder en vue
+                progress = p; Paint();
+            });
             state = AiSvc.State(Store.ClientId, "assistant");
             if (!r.Ok) { error = r.Message; return; }
             var turn = new Turn { Ask = ask, Answer = r };
             for (var i = 0; i < r.Actions.Count; i++) turn.Picked.Add(i);
             turns.Add(turn);
             text = "";
+            reveal = "aia-q";
         }
-        finally { busy = false; }
+        finally { busy = false; progress = null; stop.Dispose(); stop = null; }
     }
 
     private static void Toggle(Turn t, int i) { if (!t.Picked.Remove(i)) t.Picked.Add(i); }
@@ -167,15 +311,27 @@
     private async Task Confirm()
     {
         if (Current is not { Answer: { } ans } turn) return;
-        running = true;
+        var todo = turn.Picked.Where(i => !turn.Done.ContainsKey(i)).OrderBy(x => x).ToList();
+        running = true; turn.RunTotal = todo.Count; turn.RunDone = 0;
         StateHasChanged();
-        foreach (var i in turn.Picked.Where(i => !turn.Done.ContainsKey(i)).OrderBy(x => x).ToList())
+        _ = Tick();
+        try
         {
-            turn.Done[i] = await Assistant.Run(ans.Actions[i]);
-            StateHasChanged();
+            foreach (var i in todo)
+            {
+                turn.Running = i; actionStarted = DateTime.UtcNow; reveal = "aia-run";
+                StateHasChanged();
+                turn.Done[i] = await Assistant.Run(ans.Actions[i]);
+                turn.RunDone++;
+            }
         }
-        running = false;
-        state = AiSvc.State(Store.ClientId, "assistant");
+        finally
+        {
+            turn.Running = null;
+            running = false;
+            reveal = "aia-sum";
+            state = AiSvc.State(Store.ClientId, "assistant");
+        }
     }
 
     private async Task Undo(Turn t, int i)

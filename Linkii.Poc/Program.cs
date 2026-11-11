@@ -82,6 +82,7 @@ builder.Services.AddSingleton<AiReview>();   // relecture avant publication (pis
 builder.Services.AddSingleton<AiMedia>();   // médiathèque intelligente (piste 3) : description, mots-clés, cadrage des images
 builder.Services.AddScoped<AiAssistant>();   // assistant : réponses et actions confirmées (piste 5)
 builder.Services.AddSingleton<AiCompose>();   // compositions créées par l IA : depuis une phrase, depuis le site web (piste 4)
+builder.Services.AddSingleton<WebImages>();   // images d'illustration d'internet (Pexels) pour les compositions de l IA
 builder.Services.AddSingleton<SafeHttp>();
 builder.Services.AddSingleton<IAppProvider, WeatherProvider>();
 builder.Services.AddSingleton<IAppProvider, WeatherSlideProvider>();

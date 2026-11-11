@@ -56,6 +56,10 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
         }
     }
 
+    /// <summary>Fichier déjà téléchargé par le serveur depuis une source sûre (banque d'images, voir <see cref="WebImages"/>), rangé dans l'aire et chez le membre donnés.</summary>
+    public Task<Result> ImportDownloaded(Stream input, string name, Guid clientId, Guid? areaId, Guid? ownerId, CancellationToken ct) =>
+        Import(input, name, clientId, null, ct, areaId, null, ownerId);
+
     /// <summary>Fichier lu par le serveur (synchronisation d'un Drive) : mêmes règles que l'import, conversion vidéo comprise.</summary>
     public Task<Result> ImportStream(Stream input, string name, Guid clientId, CancellationToken ct, IProgress<long>? progress = null) => Import(input, name, clientId, progress, ct, null);   // fichiers d'un dossier Drive : communs à toutes les aires
 

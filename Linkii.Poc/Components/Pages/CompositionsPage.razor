@@ -12,6 +12,7 @@
 @inject ModeService Modes
 @inject AiService AiSvc
 @inject AiCompose AiComp
+@inject WebImages WebImg
 
 @* Compositions (§80-81, §84) : Mes compositions, et les modèles (galerie Linkivi et « Mes modèles » de l'aire). La page n'existe que si l'application
    « Compositions » est dans Mes applications. Les compositions de « Mes compositions » se placent ensuite dans les listes de lecture. *@
@@ -442,12 +443,18 @@ else
                 <button type="button" role="radio" aria-checked="@(!aiPortrait ? "true" : "false")" class="@(!aiPortrait ? "on" : "")" disabled="@aiBusy" @onclick="() => aiPortrait = false">Écran en largeur</button>
                 <button type="button" role="radio" aria-checked="@(aiPortrait ? "true" : "false")" class="@(aiPortrait ? "on" : "")" disabled="@aiBusy" @onclick="() => aiPortrait = true">Écran en hauteur</button>
             </div>
+            var webOn = WebImg.On(Store.ClientId);
+            <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;cursor:pointer">
+                <input type="checkbox" style="margin-top:3px" checked="@aiPhoto" disabled="@aiBusy" @onchange="() => aiPhoto = !aiPhoto" />
+                <span><span style="font-weight:500">Ajouter une image d'illustration</span>
+                    <small style="display:block;color:var(--muted);margin-top:2px">@(webOn ? "Une image de votre médiathèque qui convient, sinon une photo neutre (sans personne) trouvée sur internet et ajoutée à votre médiathèque." : "Une image de votre médiathèque qui convient, s'il y en a une.")</small></span>
+            </label>
             @if (aiError != null) { <div class="err" role="alert" style="margin-top:12px">@aiError</div> }
             <div class="modal-actions">
                 <button class="btn ghost" @onclick="CloseAi" disabled="@aiBusy">Annuler</button>
                 <button class="btn" disabled="@(aiBusy || aiText.Trim().Length < 4)" @onclick="CreateWithAi">@if (aiBusy) { <span>L'IA dessine</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="spark" Size="15" /> <span>Créer</span> }</button>
             </div>
-            <p class="ai-help">Proposé par l'IA, qui peut se tromper : relisez les textes avant de publier.</p>
+            <p class="ai-help"><span>Proposé par l'IA, qui peut se tromper : relisez les textes avant de publier.@if (webOn && aiPhoto) { <text> Photos d'internet fournies par <a href="@WebImages.ProviderUrl" target="_blank" rel="noopener">@WebImages.Provider</a>.</text> }</span></p>
         }
     </div>
 }
@@ -576,7 +583,7 @@ else
 
     // ---------- Créer avec l'IA : une phrase, une composition à retoucher ----------
 
-    private bool aiOpen, aiBusy, aiPortrait;
+    private bool aiOpen, aiBusy, aiPortrait, aiPhoto = true;
     private string aiText = "", aiError = "";
     private static readonly string[] AiExamples =
     {
@@ -594,8 +601,11 @@ else
         StateHasChanged();
         try
         {
-            var r = await AiComp.FromSentence(Store.ClientId, aiText, aiPortrait);
+            // image d'illustration : une image de la médiathèque qui convient, sinon une photo neutre d'internet (si l'organisation l'autorise)
+            var photos = aiPhoto ? AiCompose.PhotosFor(Store, WebImg, aiText, null, true) : null;
+            var r = await AiComp.FromSentence(Store.ClientId, aiText, aiPortrait, default, photos);
             if (!r.Ok) { aiError = r.Message; return; }
+            if (r.Photo != null) Toast.Ok($"Composition créée avec une image : {r.Photo}.");
             var slide = r.Slides[0];
             if (Compositions.Clean(slide.Doc) is not { } c) { aiError = "La composition n'a pas pu être préparée."; return; }
             var (item, errors) = Svc.SaveInstance(Compositions.AppId, null, slide.Name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
