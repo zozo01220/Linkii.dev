@@ -1,0 +1,37 @@
+@* Recherche des pages allégées du mode Simple : une loupe qui s'ouvre au clic (maquettes *-simple-allegee.html).
+   Reste ouverte tant qu'il y a un texte ; Échap l'efface et la referme. *@
+<label class="sh-q @(Open ? "on" : "")">
+    <Ico Name="search" Size="16" />
+    <input @ref="input" placeholder="@Placeholder" aria-label="@Placeholder" value="@Value" tabindex="@(Open ? 0 : -1)"
+           @oninput="e => ValueChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)" @onkeydown="Key" @onblur="() => opened = false" />
+</label>
+@if (!Open)
+{
+    <button type="button" class="sh-ib" data-tip="@Placeholder" aria-label="@Placeholder" @onclick="Show"><Ico Name="search" Size="18" /></button>
+}
+
+@code {
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Rechercher";
+
+    private ElementReference input;
+    private bool opened, focus;
+    private bool Open => opened || Value.Length > 0;
+
+    private void Show() { opened = true; focus = true; }
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape") return;
+        opened = false;
+        await ValueChanged.InvokeAsync(string.Empty);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focus) return;
+        focus = false;
+        try { await input.FocusAsync(); } catch { /* champ déjà retiré */ }
+    }
+}

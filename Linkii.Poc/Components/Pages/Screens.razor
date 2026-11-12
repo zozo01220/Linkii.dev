@@ -18,14 +18,42 @@
 @using Microsoft.JSInterop
 
 <div class="page-head">
+    @if (Modes.Simple)
+    {
+        @* mode Simple allégé (maquette ecrans-simple-allegee.html) : le titre et une ligne dont les mots sont des filtres *@
+        var shAll = InZone.Count + OtherShown.Count;
+        var shOff = InZone.Count(IsOffline);
+        <div>
+            <h1>Écrans</h1>
+            <p class="sh-meta">
+                <span>@(shAll == 0 ? "Aucun écran pour l'instant" : shAll + (shAll > 1 ? " écrans" : " écran"))</span>
+                @if (shOff > 0) { <span>·</span><button type="button" class="sh-f bad @(statusFilter == "offline" ? "on" : "")" title="N'afficher que les écrans hors ligne" @onclick='() => statusFilter = statusFilter == "offline" ? "" : "offline"'>@shOff hors ligne@if (statusFilter == "offline") { <Ico Name="x" Size="13" /> }</button> }
+                @if (PendingShown.Count > 0) { <span>·</span><button type="button" class="sh-f pe @(statusFilter == "pending" ? "on" : "")" title="N'afficher que les écrans à publier" @onclick='() => statusFilter = statusFilter == "pending" ? "" : "pending"'>@PendingShown.Count à publier@if (statusFilter == "pending") { <Ico Name="x" Size="13" /> }</button> }
+            </p>
+        </div>
+    }
+    else
+    {
     <div>
         <h1 class="cmp-h1">@if (!TreeView && currentRow is { } cur) { @FolderCrumbs(cur) } else { <span>Vos écrans</span> }<span class="scr-count" aria-label="@(Shown.Count + OtherShown.Count) écran@(Shown.Count + OtherShown.Count > 1 ? "s" : "")">@(Shown.Count + OtherShown.Count)</span></h1>
         <p class="sub sc-intro">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
     </div>
+    }
     <div class="row head-actions">
         @* Publier : seulement s'il y a des modifications à publier (écrans affichés), en couleur avec leur nombre *@
         @{ var pendHead = TreeView ? TreePending(TreeScope) : PendingShown; }
-        @if (pendHead.Count > 0)
+        @if (Modes.Simple)
+        {
+            @* mode Simple : loupe, puis publier en icône (orange avec le nombre d'écrans s'il y a quelque chose à publier) *@
+            @if (Has)
+            {
+                <SimpleSearch @bind-Value="search" />
+                <button type="button" class="sh-ib @(pendHead.Count > 0 ? "pub" : "")" disabled="@(pendHead.Count == 0 || bulkPublishing)" data-tip="@(pendHead.Count > 0 ? $"Publier sur {pendHead.Count} écran{(pendHead.Count > 1 ? "s" : "")}" : "Tout est publié")" aria-label="Publier" @onclick="() => AskPublish(pendHead)">
+                    <Ico Name="upload" Size="18" />@if (pendHead.Count > 0) { <span class="sh-cnt">@pendHead.Count</span> }
+                </button>
+            }
+        }
+        else if (pendHead.Count > 0)
         {
             <button class="btn publish-btn" disabled="@bulkPublishing" title="Publier les modifications en attente sur @pendHead.Count écran@(pendHead.Count > 1 ? "s" : "")" @onclick="() => AskPublish(pendHead)">
                 <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier") <span class="cnt">@pendHead.Count</span>
@@ -1711,6 +1739,7 @@ else if (wallEdit is { } wid)
                                     <span class="ec-ic"></span>
                                     <button type="button" class="ec-pub" disabled="@bulkPublishing" aria-label="Publier le mur @gw.Name" @onclick="() => AskPublish(gm.Select(x => x.Id).ToList())"><Ico Name="upload" Size="14" />Publier</button>
                                 </div>
+                                @if (Modes.Simple) { <button type="button" class="sh-pb ec-spb" disabled="@bulkPublishing" data-tip="Publier sur ce mur" aria-label="Publier le mur @gw.Name" @onclick="() => AskPublish(gm.Select(x => x.Id).ToList())"><Ico Name="upload" Size="15" /></button> }
                             }
                             else
                             {
@@ -1812,7 +1841,8 @@ else if (wallEdit is { } wid)
                     <div class="ec-nm">
                         @* type d'écran ; l'appareil (système, navigateur, application) est dans l'infobulle *@
                         <span class="ec-kd @(gs.Kiosk != null || gs.Room != null ? "k" : "")" data-tip="@gtip" tabindex="0" role="img" aria-label="@gtip"><Ico Name="@KindIcon(gs)" Size="16" /></span>
-                        <button type="button" class="ec-name" title="@gs.Name" @onclick="() => Edit(gs)">@gs.Name</button>
+                        @if (Modes.Simple) { <InlineName Value="@gs.Name" Class="ec-name" OnCommit="n => RenameInline(gs, n)" /> }
+                        else { <button type="button" class="ec-name" title="@gs.Name" @onclick="() => Edit(gs)">@gs.Name</button> }
                         <div class="kebab ec-kw">
                             <button type="button" class="kebab-btn" aria-label="Actions pour @gs.Name" aria-haspopup="menu" aria-expanded="@(menuFor == gs.Id ? "true" : "false")" @onclick="() => { devSub = null; menuFor = menuFor == gs.Id ? null : gs.Id; }"><Ico Name="dots-v" Size="18" /></button>
                             @if (menuFor == gs.Id)
@@ -1932,6 +1962,8 @@ else if (wallEdit is { } wid)
                         </span>
                         @if (gpending) { <button type="button" class="ec-pub" disabled="@gbusy" aria-label="Publier @gs.Name" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="14" />Publier</button> }
                     </div>
+                    @* mode Simple : pas de pied ; un rond orange sur la ligne de la liste quand l'écran est à publier *@
+                    @if (Modes.Simple && gpending) { <button type="button" class="sh-pb ec-spb" disabled="@gbusy" data-tip="Publier sur cet écran" aria-label="Publier @gs.Name" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="15" /></button> }
                 </div>
             </div>
             return;
@@ -3242,6 +3274,14 @@ else if (wallEdit is { } wid)
     {
         if (e.Key == "Enter") RenameScreen();
         else if (e.Key == "Escape") renamingScreen = null;
+    }
+
+    /// <summary>Mode Simple : nom modifié en place sur la carte.</summary>
+    private void RenameInline(Screen s, string name)
+    {
+        renamingScreen = s;
+        renameValue = name;
+        RenameScreen();
     }
 
     // Le nom n'est pas diffusé : rien à publier.

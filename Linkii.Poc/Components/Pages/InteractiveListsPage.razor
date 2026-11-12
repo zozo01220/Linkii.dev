@@ -33,10 +33,19 @@
         }
         <span class="lx-cntpill" aria-label="@Plural(Scoped.Count, "liste", "listes")">@Scoped.Count</span>
     </h1>
+    @if (Modes.Simple)
+    {
+        @* mode Simple allégé (maquette listes-interactives-simple-allegee.html) *@
+        <p class="sh-meta"><span>@(lists.Count == 0 ? "Aucune liste pour l'instant" : Plural(lists.Count, "liste", "listes"))</span></p>
+    }
+    else
+    {
     <p class="sub">Une liste interactive est l'écran tactile d'une borne : des pages, des tuiles, des textes et des images. Chaque tuile ouvre un contenu ou une autre page.</p>
+    }
     </div>
     <span class="grow"></span>
     <div class="btns">
+        @if (Modes.Simple && lists.Count > 0) { <SimpleSearch @bind-Value="search" /> }
         @if (multi && currentRow is { Right: FolderRight.Owner } here)
         {
             <button class="btn btn-share lx-share" @onclick="() => ShareFolder(here)"><Ico Name="users" Size="16" /> Partager…</button>
@@ -216,7 +225,21 @@ else
                         @if (RightOf(il) == FolderRight.Read) { <span class="lx-lock" title="Lecture seule"><Ico Name="lock" Size="13" /></span> }
                         <span class="lx-cshare">@ListShare(il)</span>
                         @if (il.Pages.Count > 0) { <button type="button" class="lx-play" title="Aperçu tactile" aria-label="Aperçu tactile de « @il.Name »" @onclick="() => trying = il.Id"><Ico Name="play" Size="22" /></button> }
+                        @if (Modes.Simple) { var ub = UsedBy(il).Count; <span class="sh-stat @(ub > 0 ? "" : "off")"><i class="d"></i>@(ub > 0 ? "Sur " + Plural(ub, "borne", "bornes") : "Aucune borne")</span> }
                     </div>
+                    @if (Modes.Simple)
+                    {
+                        @* carte allégée : nom renommable en place et une seule ligne *@
+                        <div class="lx-pbody sh-body2">
+                            <div class="grow">
+                                <InlineName Value="@il.Name" Class="pl-name" ReadOnly="@(RightOf(il) < FolderRight.Write)" OnCommit="n => RenameInline(il, n)" />
+                                <div class="lx-meta">@Plural(Tiles(il), "tuile", "tuiles") · @Plural(il.Pages.Count, "page", "pages")</div>
+                            </div>
+                            @Menu(il)
+                        </div>
+                    }
+                    else
+                    {
                     <div class="lx-pbody">
                         <div class="grow">
                             <a class="pl-name" href="/interactive/@il.Id?back=/interactive-lists" title="@il.Name" @onclick:preventDefault="true" @onclick="() => Open(il)">@il.Name</a>
@@ -227,6 +250,7 @@ else
                         </div>
                         @Menu(il)
                     </div>
+                    }
                 </div>
             }
         </div>
@@ -516,6 +540,15 @@ else
         catch (Exception e) when (e is InvalidOperationException or UnauthorizedAccessException) { Toast.Error(e.Message); }
         if (n > 0) Toast.Ok(n > 1 ? $"{n} listes dupliquées." : "Liste dupliquée.");
         picked.Clear();
+        Load();
+    }
+
+    /// <summary>Mode Simple : nom modifié en place sur la carte.</summary>
+    private void RenameInline(InteractiveList l, string name)
+    {
+        var err = Library.RenameList(l.Id, name);
+        if (err != null) { Toast.Error(err); return; }
+        Toast.Ok("Liste renommée.");
         Load();
     }
 

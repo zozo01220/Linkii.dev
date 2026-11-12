@@ -43,9 +43,33 @@ else
             <AppIcon Id="@app.Id" />
             <div>
                 <h1>@app.Name</h1>
-                <p class="sub">@app.Category@(app.Version.Length > 0 ? " · version " + app.Version : "")@(installedOn is { } on ? $" · installée le {on.ToLocalTime():dd.MM.yyyy}" : "")</p>
+                @if (SimplePage) { <p class="sh-meta"><span>@(items.Count == 0 ? "Aucun contenu" : $"{items.Count} contenu{(items.Count > 1 ? "s" : "")} · {items.Count(i => i.On)} actif{(items.Count(i => i.On) > 1 ? "s" : "")}")</span></p> }
+                else { <p class="sub">@app.Category@(app.Version.Length > 0 ? " · version " + app.Version : "")@(installedOn is { } on ? $" · installée le {on.ToLocalTime():dd.MM.yyyy}" : "")</p> }
             </div>
         </div>
+        @if (SimplePage)
+        {
+            @* mode Simple allégé (maquette applications-simple-allegee.html) : plus d'onglets ; Configurer en icône, le reste dans ⋯ *@
+            <div class="row head-actions">
+                @if (app.ScreenWidget) { <a class="btn" href="/">Placer sur un écran</a> }
+                @if (HasSync) { <button type="button" class="sh-ib" disabled="@(!CanSync || syncing)" data-tip="@(CanSync ? "Synchroniser" : "Le compte n'est pas connecté")" aria-label="Synchroniser" @onclick="Sync"><Ico Name="refresh" Size="18" /></button> }
+                <button type="button" class="sh-ib" data-tip="Configurer" aria-label="Configurer" @onclick="Configure"><Ico Name="sliders" Size="18" /></button>
+                <div class="kebab">
+                    <button type="button" class="sh-ib" aria-haspopup="menu" aria-expanded="@(headMenu ? "true" : "false")" aria-label="Plus d'actions" @onclick="() => headMenu = !headMenu"><Ico Name="dots-v" Size="18" /></button>
+                    @if (headMenu)
+                    {
+                        <div class="kebab-backdrop" @onclick="() => headMenu = false"></div>
+                        <div class="kebab-menu" role="menu">
+                            <button type="button" role="menuitem" @onclick="() => { headMenu = false; ToggleMenu(); }"><Ico Name="@(inMenu ? "check" : "eye")" Size="16" /> @(inMenu ? "Affichée dans le menu" : "Afficher dans le menu")</button>
+                            <button type="button" role="menuitem" @onclick="() => { headMenu = false; aboutOpen = true; }"><Ico Name="info" Size="16" /> À propos</button>
+                            @if (!app.DefaultOn) { <hr /><button type="button" role="menuitem" class="danger" @onclick="() => { headMenu = false; _ = Uninstall(); }"><Ico Name="trash" Size="16" /> Désinstaller</button> }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
         <div class="row head-actions">
             @if (IsPlans && Modes.Expert && haOn) { <a class="btn" href="/plans/nouveau?back=@PlanBack"><Ico Name="plus" Size="16" /> Nouveau plan</a> }
             @if (app.ScreenWidget) { <a class="btn" href="/">Placer sur un écran</a> }
@@ -53,9 +77,20 @@ else
             @if (HasSync) { <button type="button" class="btn ghost" disabled="@(!CanSync || syncing)" title="@(CanSync ? "Récupère les nouveaux contenus du compte connecté" : "Le compte n'est pas connecté")" @onclick="Sync"><Ico Name="refresh" Size="16" /> Synchroniser</button> }
             @if (!app.DefaultOn) { <button type="button" class="btn ghost danger-text" @onclick="Uninstall">Désinstaller</button> }
         </div>
+        }
     </div>
 
-    <nav class="tabs int-tabs" role="tablist" aria-label="Contenus, configuration et infos">
+    @if (SimplePage && aboutOpen)
+    {
+        <div class="modal-backdrop" @onclick="() => aboutOpen = false"></div>
+        <div class="modal" role="dialog" aria-modal="true" aria-label="À propos de @app.Name">
+            <div class="modal-head"><h3>À propos de @app.Name</h3></div>
+            <div class="modal-body">@InfoCard</div>
+            <div class="modal-foot"><button type="button" class="btn ghost" @onclick="() => aboutOpen = false">Fermer</button></div>
+        </div>
+    }
+
+    <nav class="tabs int-tabs @(SimplePage ? "sh-hide" : "")" role="tablist" aria-label="Contenus, configuration et infos">
         @if (items.Count > 0 || IsPlans) { <button type="button" role="tab" class="@(tab == "contenus" ? "on" : "")" aria-selected="@(tab == "contenus" ? "true" : "false")" @onclick='() => tab = "contenus"'>Contenus <span class="cat-count">@items.Count</span></button> }
         @if (IsRooms && items.Count > 0) { <button type="button" role="tab" class="@(tab == "resa" ? "on" : "")" aria-selected="@(tab == "resa" ? "true" : "false")" @onclick='() => tab = "resa"'>Réservations <span class="badge neutre">statut seul</span></button> }
         <button type="button" role="tab" class="@(tab == "config" ? "on" : "")" aria-selected="@(tab == "config" ? "true" : "false")" @onclick='() => tab = "config"'>Configuration</button>
@@ -226,6 +261,19 @@ else
     }
     else
     {
+        @InfoCard
+    }
+}
+
+@code {
+    /// <summary>Mode Simple, application ordinaire : page sans onglets (les salles gardent leurs onglets propres).</summary>
+    private bool SimplePage => Modes.Simple && !IsRooms && !IsPlans;
+    private bool headMenu, aboutOpen;
+
+    /// <summary>Fiche « Infos » : onglet en mode expert, fenêtre « À propos » en mode Simple.</summary>
+    private RenderFragment InfoCard => __builder =>
+    {
+        if (app == null) return;
         <div class="card apd-card">
             @if (isVirtual) { <p>@app.Summary</p> } else { <AppDetailBody App="app" /> }
             <dl class="int-kv">
@@ -246,7 +294,7 @@ else
                 }
             </dl>
         </div>
-    }
+    };
 }
 
 @if (app != null)
@@ -354,6 +402,7 @@ else
                 rows.OrderBy(r => r.Type, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
         });
         if (tab is "contenus" or "resa" && items.Count == 0 && !IsPlans) tab = "config";
+        if (SimplePage) tab = items.Count > 0 ? "contenus" : "config";   // mode Simple : pas d'onglets, les contenus d'abord
     }
 
     // ---- Réservation de salle ----

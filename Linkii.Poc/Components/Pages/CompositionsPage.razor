@@ -43,7 +43,15 @@
                 <span>Compositions</span>
             }
         </h1>
+        @if (Modes.Simple)
+        {
+            @* mode Simple allégé (maquette compositions-simple-allegee.html) *@
+            <p class="sh-meta"><span>@(items.Count == 0 ? "Aucune composition pour l'instant" : items.Count + (items.Count > 1 ? " compositions" : " composition"))</span></p>
+        }
+        else
+        {
         <p class="sub">Vos propres pages d'affichage : textes, formes, images, QR codes et horloge, à placer dans vos listes de lecture.</p>
+        }
     </div>
     @if (installed && (CanCreateHere || CanCreateFolderHere || (multi && currentRow is { Right: FolderRight.Owner })))
     {
@@ -55,7 +63,8 @@
             @if (CanCreateHere)
             {
                 @* Modèles (7 novembre 2026) : plus d'onglet, une fenêtre avec la galerie (filtres par catégorie), Mes modèles et Partagés avec moi *@
-                <button type="button" class="btn btn-share cmp-models-btn" aria-haspopup="dialog" @onclick='() => OpenModels("gallery")'><Ico Name="images" Size="16" /> Modèles</button>
+                @if (Modes.Simple) { if (items.Count > 0) { <SimpleSearch @bind-Value="search" /> } }   @* mode Simple : « Modèles » est dans le menu Ajouter *@
+                else { <button type="button" class="btn btn-share cmp-models-btn" aria-haspopup="dialog" @onclick='() => OpenModels("gallery")'><Ico Name="images" Size="16" /> Modèles</button> }
                 @* Un seul bouton « Ajouter » (même menu que la médiathèque). Look « app » : bouton flottant via les sources [data-fab]. *@
                 <div class="lx-add">
                     <button type="button" class="btn lx-add-btn" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
@@ -292,12 +301,15 @@ else
                     @if (Selectable(it)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(it.Id)" @onchange="() => Toggle(it.Id)" aria-label="Sélectionner @it.Name" /> }
                     @if (r >= FolderRight.Write) { <a class="cmp-open" href="/compositions/@it.Id" aria-label="Modifier « @it.Name »" @onclick="() => Click(it)" @onclick:preventDefault="@(picked.Count > 0)"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></a> }
                     else { <div class="cmp-open" title="Lecture seule : dupliquez-la pour l'adapter"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></div> }
+                    @if (Modes.Simple && lists.Count > 0) { <span class="sh-stat cmp-stat"><i class="d"></i>Dans @lists.Count liste@(lists.Count > 1 ? "s" : "")</span> }
                     <div class="cmp-info">
                         <div class="cmp-t">
-                            <b title="@it.Name">@it.Name</b>
+                            @if (Modes.Simple) { <InlineName Value="@it.Name" Class="cmp-n" ReadOnly="@(r < FolderRight.Write)" OnCommit="n => RenameInline(it, n)" /> }
+                            else { <b title="@it.Name">@it.Name</b> }
                             @Menu(it)
                         </div>
-                        <span class="cmp-m">@(size is { } s ? $"{s.W} × {s.H}" : "Format inconnu") · @(lists.Count == 0 ? "dans aucune liste" : lists.Count == 1 ? "dans « " + lists[0] + " »" : $"dans {lists.Count} listes")</span>
+                        @if (Modes.Simple) { <span class="cmp-m">@(size is { } ss ? (ss.H > ss.W ? "Portrait" : "Paysage") : "Format inconnu")</span> }
+                        else { <span class="cmp-m">@(size is { } s ? $"{s.W} × {s.H}" : "Format inconnu") · @(lists.Count == 0 ? "dans aucune liste" : lists.Count == 1 ? "dans « " + lists[0] + " »" : $"dans {lists.Count} listes")</span> }
                         @if (OwnerName(it.OwnerId) is { } ow) { <span class="lx-chip cmp-own" title="@OwnerTitle(ow, r)"><Ico Name="users" Size="12" /> @First(ow)</span> }
                         else if (csum.Any) { <SharePill Summary="csum" Clickable="multi && r == FolderRight.Owner" OnClick="() => Share(ShareKind.Composition, it.Id, it.Name)" /> }
                     </div>
@@ -1024,6 +1036,15 @@ else
         menuFor = null;
         renaming = (id, template);
         renameValue = current;
+    }
+
+    /// <summary>Mode Simple : nom modifié en place sur la carte.</summary>
+    private void RenameInline(MediaItem it, string name)
+    {
+        renaming = (it.Id, false);
+        renameValue = name;
+        SaveRename();
+        renaming = null;
     }
 
     private void SaveRename()

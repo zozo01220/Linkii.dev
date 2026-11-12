@@ -1,0 +1,50 @@
+@* Nom renommable en place (pages allégées du mode Simple) : un clic sur le nom ouvre le champ, Entrée ou la perte du focus enregistre, Échap annule. *@
+@if (editing)
+{
+    <input @ref="input" class="sh-ni @Class" value="@draft" maxlength="80" aria-label="Nom"
+           @oninput="e => draft = e.Value?.ToString() ?? string.Empty" @onkeydown="Key" @onblur="Commit" @onclick:stopPropagation="true" />
+}
+else if (ReadOnly)
+{
+    <span class="sh-name ro @Class" title="@Value">@Value</span>
+}
+else
+{
+    <span class="sh-name @Class" title="Renommer" role="button" tabindex="0" @onclick="Start" @onclick:stopPropagation="true" @onkeydown='e => { if (e.Key == "Enter") Start(); }'>@Value</span>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+    /// <summary>Appelé avec le nouveau nom (non vide, différent de l'ancien).</summary>
+    [Parameter] public EventCallback<string> OnCommit { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private ElementReference input;
+    private bool editing, focus, cancelled;
+    private string draft = string.Empty;
+
+    private void Start() { draft = Value; editing = true; focus = true; cancelled = false; }
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") { cancelled = true; editing = false; }
+        else if (e.Key == "Enter") await Commit();
+    }
+
+    private async Task Commit()
+    {
+        if (!editing) return;
+        editing = false;
+        var name = draft.Trim();
+        if (cancelled || name.Length == 0 || name == Value) return;
+        await OnCommit.InvokeAsync(name.Length > 80 ? name[..80] : name);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focus) return;
+        focus = false;
+        try { await input.FocusAsync(); } catch { /* champ déjà retiré */ }
+    }
+}

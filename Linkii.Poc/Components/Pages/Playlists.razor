@@ -41,10 +41,28 @@
         }
         <span class="lx-cntpill" aria-label="@Plural(playlists.Count, "liste", "listes")">@playlists.Count</span>
     </h1>
+    @if (Modes.Simple)
+    {
+        @* mode Simple allégé (maquette listes-lecture-simple-allegee.html) : une ligne dont « N à publier » est un filtre *@
+        <p class="sh-meta">
+            <span>@(playlists.Count == 0 ? "Aucune liste pour l'instant" : Plural(playlists.Count, "liste", "listes"))</span>
+            @if (PendingCount > 0) { <span>·</span><button type="button" class="sh-f pe @(filter == "pending" ? "on" : "")" title="N'afficher que les listes à publier" @onclick='() => SetFilter(filter == "pending" ? "" : "pending")'>@PendingCount à publier@if (filter == "pending") { <Ico Name="x" Size="13" /> }</button> }
+        </p>
+    }
+    else
+    {
     <p class="sub">Une liste de lecture est une boucle de contenus (images, vidéos, apps) : composez-la, puis choisissez-la sur vos écrans.</p>
+    }
     </div>
     <span class="grow"></span>
     <div class="btns">
+        @if (Modes.Simple && playlists.Count > 0)
+        {
+            <SimpleSearch @bind-Value="search" />
+            <a class="sh-ib @(PendingCount > 0 ? "pub" : "off")" href="/" data-tip="@(PendingCount > 0 ? $"Publier : {Plural(PendingCount, "liste modifiée", "listes modifiées")}" : "Tout est publié")" aria-label="Publier sur les écrans" aria-disabled="@(PendingCount == 0 ? "true" : null)">
+                <Ico Name="upload" Size="18" />@if (PendingCount > 0) { <span class="sh-cnt">@PendingCount</span> }
+            </a>
+        }
         @if (multi && currentRow is { Right: FolderRight.Owner } here)
         {
             <button class="btn btn-share lx-share" @onclick="() => ShareFolder(here)"><Ico Name="users" Size="16" /> Partager…</button>
@@ -286,7 +304,23 @@ else
                     @if (RightOfList(pl) == FolderRight.Read) { <span class="lx-lock" title="Dans un dossier partagé en lecture seule"><Ico Name="lock" Size="13" /></span> }
                     @if (!Flat) { <span class="lx-cshare">@ListShare(pl)</span> }
                     @if (pl.Draft.Count > 0) { <button type="button" class="lx-play" title="Aperçu" aria-label="Aperçu de « @pl.Name »" @onclick="() => trying = pl.Id"><Ico Name="play" Size="22" /></button> }
+                    @if (Modes.Simple && pl.Draft.Count > 0) { var su = Use(pl); <span class="sh-stat @(su.Screens > 0 ? "" : "off")"><i class="d"></i>@(su.Screens > 0 ? "Sur " + Plural(su.Screens, "écran", "écrans") : "Aucun écran")</span> }
                     </div>
+                    @if (Modes.Simple)
+                    {
+                        @* carte allégée : nom renommable en place, une ligne, rond orange si la liste est à publier *@
+                        <div class="lx-pbody sh-body2">
+                            <div class="grow">
+                                <InlineName Value="@pl.Name" Class="pl-name" ReadOnly="@(!CanEdit(pl))" OnCommit="n => RenameInline(pl, n)" />
+                                <div class="lx-meta">@(pl.Draft.Count == 0 ? "Aucun contenu" : Plural(pl.Draft.Count, "contenu", "contenus") + (total > 0 ? " · " + Helpers.FormatDuration(total) : ""))</div>
+                            </div>
+                            @if (Use(pl).Pending > 0) { <a class="sh-pb" href="/playlists/@pl.Id?publier=1" data-tip="Publier sur @Plural(Use(pl).Pending, "écran", "écrans")" aria-label="Publier « @pl.Name »"><Ico Name="upload" Size="15" /></a> }
+                            @Menu(pl)
+                        </div>
+                        @if (Flat) { @FlatPill(pl) }
+                    }
+                    else
+                    {
                     <div class="lx-pbody">
                         <a class="lx-pbody-link" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true" draggable="false"></a>
                         <div class="grow">
@@ -300,6 +334,7 @@ else
                         @Menu(pl)
                     </div>
                     @if (Flat) { @FlatPill(pl) }
+                    }
                 </div>
             }
         </div>
@@ -844,6 +879,14 @@ else
     private void OpenRename(Playlist p) { menuFor = null; renamingPl = p; newName = p.Name; creating = true; focusName = true; }
 
     private void CloseName() { creating = false; renamingPl = null; }
+
+    /// <summary>Mode Simple : nom modifié en place sur la carte.</summary>
+    private void RenameInline(Playlist p, string name)
+    {
+        renamingPl = p;
+        newName = name;
+        SubmitName();
+    }
 
     // Glisser-déposer : une liste, ou toutes les listes sélectionnées, vers un dossier (ou la racine de l'aire, null)
     private List<Guid> dragIds = new();

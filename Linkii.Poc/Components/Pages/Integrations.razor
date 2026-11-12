@@ -24,9 +24,17 @@
    Embed = "accounts" : la même page réduite aux comptes connectés, affichée dans Réglages › Connexions › Comptes (maquettes/menu-applications-refonte.html). *@
 @if (Mode != "app")
 {
+@if (Modes.Simple && Embed == null && tab == "store") { <div class="pt-crumb"><a href="/applications">‹ Applications</a></div> }
 <div class="page-head @(Embed != null ? "emb-head" : "")">
     <div>
-        @if (Embed == null && tab == "store")
+        @if (Modes.Simple && Embed == null && !accountsTab)
+        {
+            @* mode Simple allégé (maquette applications-simple-allegee.html) : le titre et le nombre, sans phrase d'explication *@
+            var shN = TabRows(tab == "store").Count;
+            <h1>@(tab == "store" ? "Store" : "Applications")</h1>
+            <p class="sh-meta"><span>@(tab == "store" ? (shN == 0 ? "Vous utilisez déjà toutes les applications" : shN + (shN > 1 ? " applications à ajouter" : " application à ajouter")) : shN + (shN > 1 ? " applications" : " application"))</span></p>
+        }
+        else if (Embed == null && tab == "store")
         {
             <h1>Store</h1>
             <p class="sub sc-intro">Les applications que vous pouvez ajouter. « Utiliser » l'installe et la configure.</p>
@@ -37,6 +45,13 @@
             <p class="sub sc-intro">Vos applications installées : leur état, leur configuration, et celles qui apparaissent dans le menu.</p>
         }
     </div>
+    @if (Modes.Simple && Embed == null && !accountsTab)
+    {
+        <div class="row head-actions">
+            <SimpleSearch @bind-Value="search" />
+            @if (tab != "store" && admin) { <a class="btn" href="/store"><Ico Name="plus" Size="16" /> Ajouter</a> }
+        </div>
+    }
     @if (admin && accountsTab && Embed == null && Addable.Any())
     {
       <div class="row head-actions int-ha">
@@ -99,7 +114,14 @@
         var visible = groups.SelectMany(g => g.Items).Select(x => x.Id).ToList();
         var picked = store ? new List<string>() : visible.Where(selected.Contains).ToList();
         var pickable = admin && !store;
-        @if (view == "list")
+        @if (Modes.Simple)
+        {
+            @* mode Simple : une seule grille de cartes compactes, sans catégories ni cases à cocher *@
+            <div class="sa-grid">
+                @foreach (var e in groups.SelectMany(g => g.Items)) { @SimpleCard(e, store, pickable) }
+            </div>
+        }
+        else if (view == "list")
         {
             <div class="int-list">
                 <div class="int-row int-hd" aria-hidden="@(pickable ? "false" : "true")">
@@ -861,6 +883,23 @@ else
     private string AccountRequired(string id) => ConnectedAccounts.For(id) is { } k ? ConnectedAccounts.Kind(k).Name : "Aucun";
 
     private string ConnectedUser(string id) => ConnectedAccounts.For(id) is { } k && AccountOf(k) is { Lost: false, User.Length: > 0 } a ? a.User : "—";
+
+    /// <summary>Carte compacte du mode Simple : icône, nom, une ligne ; « Utiliser » dans le Store, menu ⋯ au survol dans Applications.</summary>
+    private RenderFragment SimpleCard(CatalogView.Entry e, bool store, bool pickable)
+    {
+        var err = !store && e.StatusCss == "hors-ligne" && !e.Off;
+        return @<article id="cat-@e.Id" data-nid="@e.Id" class="sa-card @(store ? "st" : "") @(err ? "err" : "") @(!store && e.Off ? "off" : "") @(flashInt == e.Id ? "flash" : "")">
+            @if (!store) { <a class="sa-hit" href="@AppMenu.Href(e.Id)" aria-label="Ouvrir @e.Name"></a> }
+            <div class="int-logo" aria-hidden="true">@TileOf(e)</div>
+            <div class="sa-t">
+                <b>@e.Name</b>
+                @if (err && admin) { <button type="button" class="linklike sa-fix" title="@e.StatusTitle" @onclick="() => OpenFor(e)">@(e.StatusTitle is { Length: > 0 } why ? why : "Corriger la configuration")</button> }
+                else { <small>@(store ? e.Summary : !e.Off ? UsageText(e.Id) : "Désactivée")</small> }
+            </div>
+            @if (store) { <button type="button" class="btn ghost sm" aria-label="Utiliser @e.Name" @onclick="() => Use(e)">Utiliser</button> }
+            else if (pickable) { @KebabOf(e) }
+        </article>;
+    }
 
     private RenderFragment IntCard(CatalogView.Entry e, bool store, bool pickable)
     {
