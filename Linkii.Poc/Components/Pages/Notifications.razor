@@ -9,6 +9,28 @@
 
 @* Centre de notifications : À lire, Lues, Toutes ; filtres par catégorie, recherche, groupes par jour ; lu / non lu et suppression, un par un ou par sélection.
    Les notifications viennent d'AlertService (voir Alerts) ; le choix de ce qui est notifié se fait dans Réglages › Alertes et pause. Maquette : centre-notifications.html. *@
+@if (Modes.Simple)
+{
+    @* mode Simple allégé (§234, maquette petites-pages-simple-allegee.html) : une ligne dont « à lire » et « lues » filtrent, une loupe, une icône « Tout marquer comme lu » ;
+       plus d'onglets, de catégories ni de sélection (lu / non lu et supprimer restent au survol de chaque ligne). *@
+    var readN = all.Count - unread;
+    <div class="page-head">
+        <div>
+            <h1>Notifications</h1>
+            <p class="sh-meta">
+                <span>@(all.Count == 0 ? "Aucune notification" : all.Count + (all.Count > 1 ? " notifications" : " notification"))</span>
+                @if (unread > 0) { <span>·</span><button type="button" class="sh-f pe @(tab == "unread" ? "on" : "")" @onclick='() => SetTab(tab == "unread" ? "all" : "unread")'>@unread à lire @if (tab == "unread") { <Ico Name="x" Size="13" /> }</button> }
+                @if (readN > 0) { <span>·</span><button type="button" class="sh-f mu @(tab == "read" ? "on" : "")" @onclick='() => SetTab(tab == "read" ? "all" : "read")'>@readN lue@(readN > 1 ? "s" : "") @if (tab == "read") { <Ico Name="x" Size="13" /> }</button> }
+            </p>
+        </div>
+        <div class="row head-actions">
+            @if (all.Count > 0) { <SimpleSearch @bind-Value="query" /> }
+            <button type="button" class="sh-ib" disabled="@(unread == 0)" data-tip="@(unread > 0 ? "Tout marquer comme lu" : "Tout est lu")" aria-label="Tout marquer comme lu" @onclick="ReadAll"><Ico Name="check" Size="18" /></button>
+        </div>
+    </div>
+}
+else
+{
 <div class="page-head">
     <div>
         <h1>Notifications</h1>
@@ -38,6 +60,7 @@
     </div>
     <label class="nt-search"><Ico Name="search" Size="15" /><input type="search" placeholder="Rechercher" aria-label="Rechercher" @bind="query" @bind:event="oninput" /></label>
 </div>
+}
 
 @if (selecting && picked.Count > 0)
 {
@@ -48,8 +71,8 @@
     @{ var list = Filtered(); }
     @if (list.Count == 0)
     {
-        <div class="nt-empty"><Ico Name="bell" Size="40" /><b>@(tab == "unread" && query.Length == 0 && cat == null ? "Vous êtes à jour" : "Rien à afficher")</b>
-            <span>@(tab == "unread" && query.Length == 0 && cat == null ? "Aucune notification à lire." : "Aucune notification ne correspond.")</span>
+        <div class="nt-empty"><Ico Name="bell" Size="40" /><b>@((tab == "unread" || all.Count == 0) && query.Length == 0 && cat == null ? "Vous êtes à jour" : "Rien à afficher")</b>
+            <span>@((tab == "unread" || all.Count == 0) && query.Length == 0 && cat == null ? "Aucune notification à lire." : "Aucune notification ne correspond.")</span>
             @if (tab == "unread" && all.Count > 0) { <button type="button" class="nt-link" @onclick='() => SetTab("read")'>Voir les notifications lues</button> }
         </div>
     }
@@ -80,6 +103,7 @@
         cid = Ctx.RequireClientId(); me = Ctx.UserId ?? Guid.Empty;
         tz = Root.Read(d => d.Clients.FirstOrDefault(x => x.Id == cid)?.Timezone ?? "UTC");
         Load();
+        if (Modes.Simple) tab = "all";   // mode Simple : tout d'abord, « à lire » et « lues » sont des filtres de la ligne d'en-tête
         Root.Changed += OnChanged;
     }
 

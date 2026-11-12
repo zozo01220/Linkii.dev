@@ -1,0 +1,175 @@
+/* ---------- Petites pages : Réglages, Notifications, Approbations, Mon compte ---------- */
+document.querySelectorAll('[data-i]').forEach(e => { e.outerHTML = ico(e.dataset.i, +(e.dataset.s || 18)); });
+document.title = 'Réglages, Notifications, Approbations, Mon compte allégés (mode Simple)';
+$('#mk-title').textContent = 'Réglages, Notifications, Approbations et Mon compte allégés';
+$('#tabs').remove();
+IC.check = '<path d="M20 6 9 17l-5-5"/>';
+IC.eye = '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+IC.shield = '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.500-1-8-4-8-9V6z"/>';
+IC.wifi = '<path d="M5 12.500a10 10 0 0 1 14 0M8.500 16a5 5 0 0 1 7 0M12 20h.01M2 9a15 15 0 0 1 20 0"/>';
+IC.card = '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>';
+IC.user = '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>';
+IC.chart = '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>';
+IC.gear = '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.900 4.900l2.100 2.100M17 17l2.100 2.100M4.900 19.100L7 17M17 7l2.100-2.100"/>';
+IC.lock = '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>';
+IC.chevr = '<path d="M9 6l6 6-6 6"/>';
+
+const NOTIFS = () => [
+  { id: 1, day: "Aujourd'hui", sev: 'bad', ic: 'wifi', t: 'Réserve est hors ligne', b: 'Plus de nouvelles depuis 8 h.', cat: 'Écrans', when: '09:12', go: "Voir l'écran", read: false },
+  { id: 2, day: "Aujourd'hui", sev: 'warn', ic: 'shield', t: 'Une publication attend votre accord', b: 'Anne Martin · Promotions sur 2 écrans.', cat: 'Approbation', when: '08:40', go: 'Décider', read: false },
+  { id: 3, day: 'Hier', sev: 'ok', ic: 'check', t: 'Hall est de nouveau en ligne', b: 'Coupure de 12 minutes.', cat: 'Écrans', when: '17:05', read: false },
+  { id: 4, day: 'Hier', sev: 'info', ic: 'upload', t: 'Publication terminée', b: 'Menu du jour est à jour sur 3 écrans.', cat: 'Publication', when: '11:30', read: true },
+  { id: 5, day: 'Plus ancien', sev: 'info', ic: 'card', t: 'Paiement reçu', b: 'Plan Pro · 3 écrans.', cat: 'Abonnement', when: '02.11', read: true }
+];
+const APPRO = () => [
+  { id: 1, t: 'Promotions', who: 'Anne Martin', when: 'il y a 2 h', sum: 'Liste modifiée · 2 écrans', chips: ['+2 contenus', '1 retiré', '2 écrans'], n: 41, st: 'todo' },
+  { id: 2, t: 'Accueil visiteurs', who: 'Marc Dubois', when: 'hier', sum: 'Nouvelle liste · 1 écran', chips: ['Nouvelle liste', '1 écran'], n: 40, st: 'todo' },
+  { id: 3, t: 'Menu du jour', who: 'Anne Martin', when: '08.11', sum: 'Approuvée par vous', chips: ['+1 contenu'], n: 39, st: 'ok' },
+  { id: 4, t: 'Consignes', who: 'Marc Dubois', when: '05.11', sum: 'Refusée : date dépassée', chips: ['1 retiré'], n: 38, st: 'no' }
+];
+let ver = 'new', view = 'reglages', q = '', qOpen = false, win = null, f = null, tabOld = 'todo';
+let N = NOTIFS(), R = APPRO(), prefs = { offers: false, news: true }, payOpen = false;
+const sw = (on, a, label) => `<button type="button" class="switch ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="${label}" data-a="${a}"><span></span></button>`;
+const search = () => `<label class="es-q ${qOpen ? 'on' : ''}">${ico('search', 16)}<input id="q" placeholder="Rechercher" aria-label="Rechercher" value="${q}"></label>${qOpen ? '' : `<button type="button" class="es-ib tb" data-a="q" data-tip="Rechercher" aria-label="Rechercher">${ico('search', 18)}</button>`}`;
+const fbtn = (k, label, cls) => `<span>·</span><button type="button" class="es-f ${cls || ''} ${f === k ? 'on' : ''}" data-a="f" data-f="${k}">${label}${f === k ? ico('x', 13) : ''}</button>`;
+const hit = (s, t) => !q || (s + ' ' + t).toLowerCase().includes(q.toLowerCase());
+
+/* ----- Réglages ----- */
+function reglages() {
+  if (ver === 'old') {
+    const nav = [['Vue d\'ensemble', [['chart', 'Utilisation', 1]]], ['Diffusion', [['monitor', 'Veille et luminosité']]], ['Création', [['spark', 'Intelligence artificielle']]], ['Suivi', [['shield', 'Approbation']]], ['Revenus', [['upload', 'Publicité']]], ['Abonnement', [['card', 'Plan et paiement']]], ['Mon compte', [['user', 'Compte et confidentialité']]]];
+    return `<div class="page-head"><div><h1>Réglages</h1><p class="sub">Les réglages de votre organisation.</p></div></div>
+      <div class="zp-old"><nav class="zp-nav">${nav.map(g => `<h6>${g[0]}</h6>${g[1].map(i => `<a class="${i[2] ? 'on' : ''}">${ico(i[0], 16)} ${i[1]}</a>`).join('')}`).join('')}</nav>
+      <div class="zp-body"><h2>Utilisation</h2><p class="sub" style="margin-bottom:16px">Ce que contient votre organisation aujourd'hui.</p>
+        <h5>Diffusion</h5><div class="zp-tiles">${tile('Écrans', 3, '2 en ligne · 1 hors ligne', 'Voir les écrans →')}${tile('Playlists', 2, '2 en diffusion', 'Voir les playlists →')}${tile('Aires de gestion', 1, 'Principale', 'Gérer les aires →')}${tile('Zones', 1, "aucun mur d'écrans", 'Gérer les zones →')}</div>
+        <h5>Médiathèque</h5><div class="zp-tiles">${tile('Images', 21, '160 Mo')}${tile('Vidéos', 3, '20 Mo')}${tile('Compositions', 6, '2 en diffusion')}${tile('Non utilisés', 4, 'à trier')}</div>
+        <h5>Applications</h5><div class="zp-tiles">${tile('Installées', 9, '3 utilisées')}${tile('Comptes connectés', 0, 'aucun')}</div></div></div>`;
+  }
+  const pays = [['02.11.2026', '45.00 CHF'], ['02.10.2026', '45.00 CHF'], ['02.09.2026', '45.00 CHF']];
+  return `<header class="es-head"><div><h1>Réglages</h1><p class="es-meta"><span>Test Simple · plan Pro</span></p></div></header>
+    <section class="zp-sec"><h3>Utilisation</h3>
+      <div class="zp-use">${use('monitor', 3, 'écrans', '1 hors ligne')}${use('list', 2, 'listes de lecture', '2 diffusées')}${use('image', 24, 'médias', '180 Mo')}${use('grid', 9, 'applications', '3 utilisées')}</div></section>
+    <section class="zp-sec"><h3>Plan et paiement</h3>
+      <div class="zp-card">
+        <div class="zp-plan"><span class="plan-tag pro">${ico('crown', 13)}Pro</span><div><b>45.00 CHF par mois</b><small>3 écrans × 15.00 CHF · prochaine échéance le 02.12.2026</small></div>
+          <button type="button" class="btn ghost sm" data-a="toast" data-t="Ouvre « Choisir mon plan »">Changer de plan</button></div>
+        <div class="zp-row"><span>${ico('card', 16)} Carte •••• 4242</span><button type="button" class="es-rl2" data-a="toast" data-t="Ouvre la gestion de la carte et des reçus">Gérer la carte et les reçus</button></div>
+        <div class="zp-row"><button type="button" class="es-rl2" data-a="pay">${payOpen ? 'Masquer' : 'Voir'} les derniers paiements ${ico(payOpen ? 'chev' : 'chevr', 14)}</button>
+          <button type="button" class="es-rl2 mu" data-a="toast" data-t="Ouvre « Résilier votre abonnement »">Résilier</button></div>
+        ${payOpen ? pays.map(p => `<div class="zp-row pay"><span>${p[0]}</span><span>${p[1]} · payé</span></div>`).join('') : ''}
+      </div></section>`;
+}
+const tile = (t, n, d, go) => `<div class="zp-tile"><span>${t}</span><b>${n}</b><small>${d}</small>${go ? `<em>${go}</em>` : ''}</div>`;
+const use = (i, n, w, d) => `<div class="zp-u"><i>${ico(i, 18)}</i><div><b>${n} <span>${w}</span></b><small>${d}</small></div></div>`;
+
+/* ----- Notifications ----- */
+function nrow(n) {
+  return `<div class="np ${n.read ? '' : 'unread'} sev-${n.sev}" data-id="${n.id}" data-a="nopen"><span class="np-ic">${ico(n.ic, 18)}</span>
+    <div class="np-tx"><b>${n.t}</b><span>${n.b}</span>${ver === 'old' ? `<small><em>${n.cat}</em> ${n.when}</small>` : ''}</div>
+    ${ver === 'new' ? `<small class="np-when">${n.when}</small>` : ''}
+    <div class="np-act"><span class="np-hov"><button type="button" data-a="nread" title="${n.read ? 'Marquer comme non lue' : 'Marquer comme lue'}" aria-label="Lu / non lu">${ico(n.read ? 'eye' : 'check', 15)}</button><button type="button" data-a="ndel" title="Supprimer" aria-label="Supprimer">${ico('trash', 15)}</button></span>
+    ${n.go ? `<button type="button" class="btn ghost sm" data-a="nopen">${n.go}</button>` : ''}</div></div>`;
+}
+function notifs() {
+  const unread = N.filter(n => !n.read).length;
+  const list = N.filter(n => hit(n.t, n.b)).filter(n => ver === 'old' ? (tabOld === 'todo' ? !n.read : tabOld === 'done' ? n.read : true) : (f === 'unread' ? !n.read : f === 'read' ? n.read : true));
+  const days = [...new Set(list.map(n => n.day))];
+  const body = list.length ? days.map(d => `<div class="np-day">${d}</div>${list.filter(n => n.day === d).map(nrow).join('')}`).join('') : `<div class="es-none">${unread === 0 && !q ? 'Vous êtes à jour' : 'Aucune notification ne correspond'}</div>`;
+  if (ver === 'old') {
+    const cats = [...new Set(N.map(n => n.cat))];
+    return `<div class="page-head"><div><h1>Notifications</h1><p class="sub">${unread ? unread + ' à lire' : 'Tout est lu'} · conservées 90 jours</p></div>
+        <div class="row head-actions" style="display:flex;gap:10px"><button type="button" class="btn">${ico('check', 16)} Sélectionner</button><button type="button" class="btn" data-a="nall">${ico('eye', 16)} Tout marquer comme lu</button></div></div>
+      <div class="nt-tabs zp-tabs">${[['todo', 'À lire', unread], ['done', 'Lues', N.length - unread], ['all', 'Toutes']].map(t => `<button type="button" class="${tabOld === t[0] ? 'on' : ''}" data-a="otab" data-v="${t[0]}">${t[1]}${t[2] != null ? ` <span>${t[2]}</span>` : ''}</button>`).join('')}</div>
+      <div class="zp-bar"><div class="zp-chips"><button type="button" class="chip on">Toutes les catégories</button>${cats.map(c => `<button type="button" class="chip">${c} <small>${N.filter(n => n.cat === c).length}</small></button>`).join('')}</div>
+        <label class="search-box" style="margin:0;width:220px">${ico('search', 15)}<input id="q" placeholder="Rechercher" value="${q}"></label></div>
+      <div class="np-list">${body}</div>`;
+  }
+  return `<header class="es-head"><div><h1>Notifications</h1><p class="es-meta"><span>${N.length ? pl(N.length, 'notification') : 'Aucune notification'}</span>${unread ? fbtn('unread', unread + ' à lire', 'pe') : ''}${N.length - unread ? fbtn('read', pl(N.length - unread, 'lue'), 'mu') : ''}</p></div>
+      <div class="es-act">${N.length ? search() : ''}<button type="button" class="es-ib tb tr" data-a="nall" ${unread ? '' : 'disabled'} data-tip="${unread ? 'Tout marquer comme lu' : 'Tout est lu'}" aria-label="Tout marquer comme lu">${ico('check', 18)}</button></div></header>
+    <div class="np-list">${body}</div>`;
+}
+
+/* ----- Approbations ----- */
+function arow(r) {
+  const st = r.st === 'todo' ? '<span class="pill warn">En attente</span>' : r.st === 'ok' ? '<span class="pill ok">Approuvée</span>' : '<span class="pill bad">Refusée</span>';
+  return `<div class="np ap2" data-id="${r.id}" data-a="aopen"><span class="np-ic n">${ico('monitor', 18)}</span>
+    <div class="np-tx"><b>${r.t}</b><span>${ver === 'old' ? `${r.who} · n° ${r.n}` : `${r.who} · ${r.when} · ${r.sum}`}</span>${ver === 'old' ? `<small>${r.chips.map(c => `<em>${c}</em>`).join(' ')}</small>` : ''}</div>
+    ${ver === 'old' ? `<div class="np-rt"><small>${r.when}</small>${st}</div>`
+      : r.st === 'todo' ? `<div class="np-act"><button type="button" class="btn ghost sm" data-a="ano">Refuser</button><button type="button" class="btn sm" data-a="aok">Approuver</button></div>` : `<div class="np-act">${st}</div>`}</div>`;
+}
+function appro() {
+  const todo = R.filter(r => r.st === 'todo').length, done = R.length - todo;
+  const list = R.filter(r => hit(r.t, r.who)).filter(r => ver === 'old' ? (tabOld === 'done' ? r.st !== 'todo' : r.st === 'todo') : (f === 'todo' ? r.st === 'todo' : f === 'done' ? r.st !== 'todo' : true));
+  const body = list.length ? list.map(arow).join('') : '<div class="es-none">Rien à approuver</div>';
+  if (ver === 'old') return `<div class="page-head"><div><h1>Approbations</h1><p class="sub">Publications en attente de décision dans votre périmètre.</p></div></div>
+      <div class="nt-tabs zp-tabs">${[['todo', 'À approuver', todo], ['done', 'Historique', done]].map(t => `<button type="button" class="${(tabOld === 'done' ? 'done' : 'todo') === t[0] ? 'on' : ''}" data-a="otab" data-v="${t[0]}">${t[1]} <span>${t[2]}</span></button>`).join('')}</div>
+      <div class="zp-bar"><select style="width:auto"><option>Toutes les zones</option></select><span style="flex:1"></span><label class="search-box" style="margin:0;width:220px">${ico('search', 15)}<input id="q" placeholder="Rechercher" value="${q}"></label></div>
+      <div class="np-list">${body}</div><p class="hint" style="margin-top:10px;color:var(--muted);font-size:13px">Les plus anciennes d'abord. Un rappel part après 24 h sans réponse.</p>`;
+  return `<header class="es-head"><div><h1>Approbations</h1><p class="es-meta"><span>${pl(R.length, 'demande')}</span>${todo ? fbtn('todo', todo + ' à approuver', 'pe') : ''}${done ? fbtn('done', pl(done, 'décidée'), 'mu') : ''}</p></div>
+      <div class="es-act">${search()}</div></header><div class="np-list">${body}</div>`;
+}
+
+/* ----- Mon compte ----- */
+function compte() {
+  if (ver === 'old') return `<div class="page-head"><div><h1>Mon compte</h1><p class="sub">test-simple@exemple.ch</p></div></div>
+      <div class="card" style="max-width:460px;padding:20px"><h3 style="margin-bottom:10px">Mot de passe</h3><label class="ap-f">Mot de passe actuel<input type="password"></label><label class="ap-f">Nouveau mot de passe (8 caractères minimum)<input type="password"></label><button type="button" class="btn">Changer le mot de passe</button></div>
+      <div class="card" style="max-width:460px;padding:20px;margin-top:16px"><h3 style="margin-bottom:10px">Vos préférences de communication</h3>
+        <div class="zp-row"><span>J'accepte de recevoir les offres commerciales de Linkivi</span>${sw(prefs.offers, 'p1', 'Offres')}</div>
+        <div class="zp-row"><span>Je souhaite être informé des nouveautés et astuces</span>${sw(prefs.news, 'p2', 'Nouveautés')}</div>
+        <p style="color:var(--muted);font-size:13px;margin-top:10px">Vous pouvez changer d'avis à tout moment. Les messages de service (sécurité, factures) sont toujours envoyés.</p></div>`;
+  return `<header class="es-head"><div><h1>Mon compte</h1><p class="es-meta"><span>Test Simple · test-simple@exemple.ch</span></p></div></header>
+    <div class="zp-card" style="max-width:640px">
+      <div class="zp-row big"><span>${ico('lock', 16)} <b>Mot de passe</b></span><button type="button" class="btn ghost sm" data-a="pwd">Modifier</button></div>
+      <div class="zp-row big"><span><b>Offres de Linkivi par e-mail</b></span>${sw(prefs.offers, 'p1', 'Offres')}</div>
+      <div class="zp-row big"><span><b>Nouveautés et astuces par e-mail</b></span>${sw(prefs.news, 'p2', 'Nouveautés')}</div>
+    </div>`;
+}
+const winHtml = () => win !== 'pwd' ? '' : `<div class="ap-ov" data-a="close"><div class="ap-win" role="dialog" aria-modal="true"><h2>Modifier le mot de passe</h2>
+  <label class="ap-f">Mot de passe actuel<input type="password"></label><label class="ap-f">Nouveau mot de passe<input type="password" placeholder="8 caractères minimum"></label>
+  <div class="ap-foot"><button type="button" class="btn ghost" data-a="close">Annuler</button><button type="button" class="btn" data-a="pwdok">Enregistrer</button></div></div></div>`;
+
+const NAV = { reglages: null, notifs: null, appro: 'appro', compte: null };
+function render() {
+  document.body.className = 'v-' + ver;
+  $('#page').innerHTML = ({ reglages, notifs, appro, compte })[view]() + winHtml();
+  $('#mk-view').querySelectorAll('.mk-btn').forEach(b => b.classList.toggle('on', b.dataset.v === view));
+  document.querySelectorAll('.sidebar .nav').forEach(a => a.classList.toggle('active', a.dataset.nav === NAV[view]));
+}
+document.addEventListener('click', e => {
+  if (e.target.closest('.mk-note, .sidebar, .qbar')) return;
+  if (e.target.closest('#q, .ap-win input')) return;
+  const a = e.target.closest('[data-a]'); if (!a) return;
+  if (a.dataset.a === 'close' && e.target.closest('.ap-win') && !e.target.closest('button')) return;
+  const host = e.target.closest('[data-id]'), n = host && N.find(x => x.id == host.dataset.id), r = host && R.find(x => x.id == host.dataset.id);
+  e.preventDefault(); e.stopPropagation();
+  switch (a.dataset.a) {
+    case 'q': qOpen = true; render(); $('#q').focus(); return;
+    case 'f': f = f === a.dataset.f ? null : a.dataset.f; break;
+    case 'otab': tabOld = a.dataset.v; break;
+    case 'toast': toast(a.dataset.t); break;
+    case 'pay': payOpen = !payOpen; break;
+    case 'nopen': n.read = true; toast(n.go ? `Ouvre : ${n.go.toLowerCase()}` : 'Notification lue'); break;
+    case 'nread': n.read = !n.read; break;
+    case 'ndel': N = N.filter(x => x !== n); break;
+    case 'nall': N.forEach(x => x.read = true); if (f === 'unread') f = null; toast('Tout est marqué comme lu'); break;
+    case 'aopen': toast(`Ouvre le détail de la demande n° ${r.n} (avant / après, aperçu, échanges)`); break;
+    case 'aok': r.st = 'ok'; r.sum = 'Approuvée par vous'; toast(`« ${r.t} » approuvée : la publication part sur les écrans`); break;
+    case 'ano': r.st = 'no'; r.sum = 'Refusée par vous'; toast(`« ${r.t} » refusée (un motif est demandé dans l'application)`); break;
+    case 'p1': prefs.offers = !prefs.offers; break;
+    case 'p2': prefs.news = !prefs.news; break;
+    case 'pwd': win = 'pwd'; break;
+    case 'close': win = null; break;
+    case 'pwdok': win = null; toast('Mot de passe modifié'); break;
+  }
+  render();
+});
+document.addEventListener('input', e => { if (e.target.id === 'q') { q = e.target.value; const p = e.target.selectionStart; render(); const x = $('#q'); x.focus(); x.setSelectionRange(p, p); } });
+document.addEventListener('keydown', e => { if (e.target.id === 'q' && e.key === 'Escape') { q = ''; qOpen = false; render(); } });
+document.addEventListener('focusout', e => { if (e.target.id === 'q' && !q) { qOpen = false; setTimeout(render); } });
+function seg(id, fn) { $(id).addEventListener('click', e => { const b = e.target.closest('.mk-btn'); if (!b) return; $(id).querySelectorAll('.mk-btn').forEach(x => x.classList.toggle('on', x === b)); fn(b.dataset.v); render(); }); }
+seg('#mk-ver', v => ver = v);
+seg('#mk-view', v => { view = v; q = ''; qOpen = false; f = null; win = null; tabOld = 'todo'; });
+render();
+</script>
+</body>
+</html>

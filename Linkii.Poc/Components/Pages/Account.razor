@@ -3,6 +3,7 @@
 @inject JsonStore Root
 @inject TenantContext Ctx
 @inject Toaster Toast
+@inject ModeService Modes
 
 <div class="page-head">
     <div>
@@ -11,6 +12,30 @@
     </div>
 </div>
 
+@if (Modes.Simple)
+{
+    @* mode Simple allégé (§234, maquette petites-pages-simple-allegee.html) : une carte de trois lignes ; le mot de passe se change dans une fenêtre centrée *@
+    <div class="sr-card" style="max-width:640px">
+        <div class="sr-row big"><span><Ico Name="lock" Size="16" /> <b>Mot de passe</b></span><button type="button" class="btn ghost sm" @onclick="() => { oldPwd = newPwd = string.Empty; pwdOpen = true; }">Modifier</button></div>
+        <ConsentPrefs Compact="true" />
+    </div>
+    @if (pwdOpen)
+    {
+        <div class="modal-backdrop" @onclick="() => pwdOpen = false"></div>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pwd-title" style="max-width:440px">
+            <div class="modal-head"><h3 id="pwd-title">Modifier le mot de passe</h3></div>
+            <div class="modal-body">
+                <label class="lbl">Mot de passe actuel</label>
+                <input class="full" type="password" @bind="oldPwd" autocomplete="current-password" />
+                <label class="lbl">Nouveau mot de passe <small>(8 caractères minimum)</small></label>
+                <input class="full" type="password" @bind="newPwd" autocomplete="new-password" />
+            </div>
+            <div class="modal-foot"><button type="button" class="btn ghost" @onclick="() => pwdOpen = false">Annuler</button><button type="button" class="btn" @onclick="Change">Enregistrer</button></div>
+        </div>
+    }
+}
+else
+{
 <div class="card" style="max-width:460px">
     <h3>Mot de passe</h3>
     <label class="lbl">Mot de passe actuel</label>
@@ -20,9 +45,11 @@
     <div style="margin-top:12px"><button class="btn" @onclick="Change">Changer le mot de passe</button></div>
 </div>
 <div style="max-width:460px;margin-top:16px"><ConsentPrefs /></div>
+}
 
 @code {
     private string oldPwd = "", newPwd = "";
+    private bool pwdOpen;
 
     private void Change()
     {
@@ -32,6 +59,7 @@
         if (newPwd.Length < 8) { Toast.Error("Le nouveau mot de passe est trop court (8 caractères minimum)."); return; }
         Root.Write(d => { d.Users.First(u => u.Id == uid).PasswordHash = Passwords.Hash(newPwd); });
         oldPwd = newPwd = "";
+        pwdOpen = false;
         Toast.Ok("Mot de passe modifié.");
     }
 }

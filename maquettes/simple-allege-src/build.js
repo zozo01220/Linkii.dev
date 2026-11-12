@@ -115,3 +115,82 @@ A = rep(A, '/* état vide */', `/* Applications */
 @media (max-width:760px){.ar{grid-template-columns:72px minmax(0,1fr) auto 36px;gap:12px;padding:12px 14px}.ar-th{width:72px;height:41px;font-size:14px}}
 /* état vide */`);
 out('applications-simple-allegee.html', 'Applications allégées (mode Simple)', A);
+
+/* ---- Petites pages (Réglages, Notifications, Approbations, Mon compte) : même coquille que les applications ---- */
+const cutA = A.indexOf('/* ---------- Applications : Mes applications');
+if (cutA < 0) throw new Error('repère des applications introuvable');
+let S = A.slice(0, cutA) + fs.readFileSync(SP + '/small-js.src', 'utf8');
+S = rep(S, '<button type="button" class="mk-btn on" data-v="mine">Applications</button><button type="button" class="mk-btn" data-v="store" style="border-radius:0;border-left:0">Store</button><button type="button" class="mk-btn" data-v="app">Une application</button>',
+  '<button type="button" class="mk-btn on" data-v="reglages">Réglages</button><button type="button" class="mk-btn" data-v="notifs" style="border-radius:0;border-left:0">Notifications</button><button type="button" class="mk-btn" data-v="appro" style="border-radius:0;border-left:0">Approbations</button><button type="button" class="mk-btn" data-v="compte">Mon compte</button>');
+S = rep(S, '/* état vide */', `/* Petites pages */
+.zp-sec{margin-bottom:28px}
+.zp-sec h3{font-size:17px;font-weight:600;margin-bottom:12px}
+.zp-use{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.zp-u{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #DDE3EA;border-radius:14px;padding:14px 16px}
+.zp-u i{flex:none;width:38px;height:38px;border-radius:10px;background:#EAF1FA;color:var(--signal);display:grid;place-items:center}
+.zp-u b{display:block;font-size:17px;font-weight:600}
+.zp-u b span{font-size:14px;font-weight:400;color:var(--ink)}
+.zp-u small{color:#5A6B80;font-size:13px}
+.zp-card{background:#fff;border:1px solid #DDE3EA;border-radius:14px;max-width:720px}
+.zp-plan{display:flex;align-items:center;gap:14px;padding:18px 20px}
+.zp-plan > div{flex:1;min-width:0}
+.zp-plan .plan-tag{display:inline-flex;align-items:center;gap:4px;flex:none;white-space:nowrap}
+.zp-plan b{display:block;font-size:17px;font-weight:600}
+.zp-plan small{color:#5A6B80;font-size:13.5px}
+.zp-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-top:1px solid var(--row);font-size:14px}
+.zp-row > span{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.zp-row.big{padding:16px 20px}
+.zp-row.big:first-child{border-top:0}
+.zp-row.big b{font-weight:500;font-size:15px}
+.zp-row.pay{color:#5A6B80;font-size:13.5px;padding:9px 20px}
+.zp-row .switch{flex:none}
+.es-rl2{border:0;background:none;font:inherit;color:var(--signal);cursor:pointer;padding:2px 6px;margin:0 -6px;border-radius:6px;display:inline-flex;align-items:center;gap:4px}
+.es-rl2:hover{background:var(--row)}
+.es-rl2.mu{color:var(--muted)}
+.es-f.bad{color:var(--danger)}
+.np-list{background:#fff;border:1px solid var(--line);border-radius:12px}
+.np-day{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:12px 20px 6px;border-top:1px solid var(--row)}
+.np-day:first-child{border-top:0}
+.np{display:flex;align-items:center;gap:14px;padding:12px 20px;border-top:1px solid var(--row);cursor:pointer;position:relative}
+.np-day + .np,.np:first-child{border-top:0}
+.np:hover{background:#FAFBFD}
+.np-ic{flex:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:#EAF1FA;color:var(--signal)}
+.np-ic.n{background:#E8EEF7;color:#12315C}
+.np.sev-bad .np-ic{background:#FBE9E7;color:#C0392B}
+.np.sev-warn .np-ic{background:#FDF0DD;color:#B5650F}
+.np.sev-ok .np-ic{background:#E3F4EA;color:#2E8B57}
+.np-tx{flex:1;min-width:0}
+.np-tx b{display:block;font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np.unread .np-tx b{font-weight:600}
+.np.unread::before{content:"";position:absolute;left:8px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--signal)}
+.np-tx > span{display:block;color:#5A6B80;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np-tx small{display:flex;gap:6px;align-items:center;color:#5A6B80;font-size:12px;margin-top:3px}
+.np-tx small em{font-style:normal;background:var(--row);border-radius:99px;padding:1px 8px}
+.np-when{flex:none;color:#5A6B80;font-size:13px}
+.np-act{flex:none;display:flex;align-items:center;gap:8px}
+.np-hov{display:flex;gap:2px;opacity:0;transition:opacity .12s}
+.np:hover .np-hov{opacity:1}
+.np-hov button{width:30px;height:30px;border:0;background:none;border-radius:8px;color:#5A6B80;display:grid;place-items:center;cursor:pointer}
+.np-hov button:hover{background:#EEF1F5;color:#0B1F3A}
+.np-rt{flex:none;display:grid;gap:4px;justify-items:end}
+.np-rt small{color:#5A6B80;font-size:12.5px}
+.pill.warn{background:#FDF0DD;color:#9A530C}.pill.ok{background:#E3F4EA;color:#1E7A4A}.pill.bad{background:#FBE9E7;color:#B03A2E}
+.pill{display:inline-block;border-radius:99px;padding:2px 10px;font-size:12px;font-weight:500}
+.zp-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.zp-tabs button{border:0;background:none;font:inherit;padding:10px 14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}
+.zp-tabs button.on{color:var(--ink);font-weight:600;border-bottom-color:var(--signal)}
+.zp-tabs button span{background:var(--row);border-radius:9px;padding:0 6px;font-size:12px;margin-left:4px}
+.zp-bar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.zp-chips{display:flex;gap:8px;flex-wrap:wrap;flex:1}
+.zp-old{display:grid;grid-template-columns:230px minmax(0,1fr);gap:28px}
+.zp-nav h6{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:14px 0 4px;font-weight:600}
+.zp-nav a{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:14px;color:var(--ink)}
+.zp-nav a.on{background:#E4EFF9;font-weight:500}
+.zp-body h2{font-size:22px}
+.zp-body h5{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:18px 0 8px;font-weight:600}
+.zp-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.zp-tile{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;display:grid;gap:2px}
+.zp-tile span{font-size:13px;color:var(--muted)}.zp-tile b{font-size:26px;font-weight:600}.zp-tile small{font-size:12.5px;color:var(--muted)}.zp-tile em{font-style:normal;font-size:12.5px;color:var(--signal);margin-top:6px}
+@media (max-width:900px){.zp-old{grid-template-columns:1fr}.zp-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.np-when{display:none}}
+/* état vide */`);
+out('petites-pages-simple-allegee.html', 'Réglages, Notifications, Approbations, Mon compte allégés (mode Simple)', S);

@@ -119,6 +119,48 @@
         else
         {
             @* ---------- Abonnement en cours ---------- *@
+            @if (Compact)
+            {
+                @* mode Simple : tout en une carte (maquette petites-pages-simple-allegee.html) ; paiements repliés, « Résilier » discret *@
+                @if (c.CancelAtUtc != null)
+                {
+                    <div class="sb-warn"><b>Résiliation programmée.</b> Vos écrans diffusent jusqu'au @Day(c.CancelAtUtc), puis vos contenus seront supprimés le @Day(c.CancelAtUtc?.AddDays(retention)). <button type="button" class="btn sm" @onclick="Resume">Annuler la résiliation</button></div>
+                }
+                <div class="sr-card">
+                    <div class="sr-plan">
+                        <PlanTag Plan="@c.Plan" />
+                        <div><b>@Lifecycle_.Chf(Amount(c.PendingPlan ?? c.Plan, c.BillingPeriod)) @PerLabel</b><small>@screens écran@(screens > 1 ? "s" : "") · @(inTrial ? "premier prélèvement" : "prochaine échéance") le @Day(c.NextRenewalUtc)@(c.PendingPlan != null ? $" · Essential dès cette date" : "")</small></div>
+                        @if (c.CancelAtUtc == null)
+                        {
+                            <div class="kebab">
+                                <button type="button" class="btn ghost sm" aria-haspopup="menu" aria-expanded="@(planMenu ? "true" : "false")" @onclick="() => planMenu = !planMenu">Changer de plan</button>
+                                @if (planMenu)
+                                {
+                                    <div class="kebab-backdrop" @onclick="() => planMenu = false"></div>
+                                    <div class="kebab-menu" role="menu">
+                                        @if (c.PendingPlan != null) { <button type="button" role="menuitem" @onclick="() => { planMenu = false; UndoBase(); }">Rester en Pro</button> }
+                                        else if (c.IsGrowth) { <button type="button" role="menuitem" @onclick='() => { planMenu = false; view = "base"; }'>Passer à Essential</button> }
+                                        else { <button type="button" role="menuitem" @onclick="() => { planMenu = false; StartUpgrade(); }">Passer à Pro</button> }
+                                        <button type="button" role="menuitem" @onclick="() => { planMenu = false; SwitchPeriod(); }">@(c.PendingPeriod != null ? "Garder la facturation actuelle" : c.BillingPeriod == "annual" ? "Passer au mensuel" : $"Passer à l'annuel (−{annualPct} %)")</button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <div class="sr-row"><span><Ico Name="file" Size="16" /> Carte @(c.CardLast4.Length > 0 ? $"•••• {c.CardLast4}" : "non renseignée")</span><button type="button" class="sr-link" @onclick="StartCard">Gérer la carte et les reçus</button></div>
+                    <div class="sr-row">
+                        <button type="button" class="sr-link" aria-expanded="@(paysOpen ? "true" : "false")" @onclick="() => paysOpen = !paysOpen">@(paysOpen ? "Masquer" : "Voir") les derniers paiements</button>
+                        @if (c.CancelAtUtc == null) { <button type="button" class="sr-link mu" @onclick='() => view = "cancel"'>Résilier</button> }
+                    </div>
+                    @if (paysOpen)
+                    {
+                        @if (payments.Count == 0) { <div class="sr-row pay"><span>Aucun paiement pour l'instant@(inTrial ? $" : le premier aura lieu le {Day(c.NextRenewalUtc)}" : "").</span></div> }
+                        @foreach (var p in payments) { <div class="sr-row pay"><span>@Day(p.PaidUtc)</span><span>@Lifecycle_.Chf(p.Amount)@(p.Simulated ? " · simulé" : "")</span></div> }
+                    }
+                </div>
+            }
+            else
+            {
             <div class="rg-ph"><h2>Abonnement</h2><p>Votre plan, vos écrans facturés et vos paiements.</p></div>
             @if (c.CancelAtUtc != null)
             {
@@ -163,6 +205,7 @@
                 </div>
             </div>
             @if (c.CancelAtUtc == null) { <p style="margin-top:14px"><a href="" class="sb-cancel" @onclick:preventDefault @onclick='() => view = "cancel"'>Résilier mon abonnement</a></p> }
+            }
         }
         break;
 }
@@ -176,6 +219,9 @@
     private static readonly string[] Reasons = { "Trop cher", "Projet terminé", "Fonction manquante", "Autre outil", "Autre" };
 
     private Tenant? c;
+    /// <summary>Mode Simple : l'abonnement en cours tient en une carte (les parcours « choisir un plan », « résilier » ne changent pas).</summary>
+    [Parameter] public bool Compact { get; set; }
+    private bool planMenu, paysOpen;
     private string view = "";   // "" | base | cancel
     private string plan = Plans.Growth, period = "monthly";
     private int screens, unpaired, annualPct, retention;

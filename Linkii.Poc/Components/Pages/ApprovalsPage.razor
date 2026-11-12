@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject Toaster Toast
 @inject JsonStore Root
+@inject ModeService Modes
 @implements IDisposable
 
 @* Approbation des publications (§162, maquette approbation-publications.html, scènes 3 et 4). Un approbateur voit les demandes de son périmètre (À approuver, Historique),
@@ -20,12 +21,22 @@ else
     <div class="page-head">
         <div>
             <h1>@(decider ? "Approbations" : "Mes demandes")</h1>
-            <p class="sub">@(decider ? "Publications en attente de décision dans votre périmètre." : "Ce que vous avez envoyé à approuver.")</p>
+            @if (Modes.Simple)
+            {
+                @* mode Simple allégé (§234) : une ligne dont « à approuver » et « décidées » filtrent ; plus d'onglets ni de barre d'outils *@
+                <p class="sh-meta">
+                    <span>@(rows.Count == 0 ? "Aucune demande" : rows.Count + (rows.Count > 1 ? " demandes" : " demande"))</span>
+                    @if (decider && todo.Count > 0) { <span>·</span><button type="button" class="sh-f pe @(tab == "todo" ? "on" : "")" @onclick='() => tab = tab == "todo" ? "all" : "todo"'>@todo.Count à approuver @if (tab == "todo") { <Ico Name="x" Size="13" /> }</button> }
+                    @if (decider && done.Count > 0) { <span>·</span><button type="button" class="sh-f mu @(tab == "done" ? "on" : "")" @onclick='() => tab = tab == "done" ? "all" : "done"'>@done.Count décidée@(done.Count > 1 ? "s" : "") @if (tab == "done") { <Ico Name="x" Size="13" /> }</button> }
+                </p>
+            }
+            else { <p class="sub">@(decider ? "Publications en attente de décision dans votre périmètre." : "Ce que vous avez envoyé à approuver.")</p> }
         </div>
-        @if (decider && !admin) { <div class="row head-actions"><span class="sub">@ScopeText</span></div> }
+        @if (Modes.Simple) { <div class="row head-actions">@if (rows.Count > 0) { <SimpleSearch @bind-Value="query" /> }</div> }
+        else if (decider && !admin) { <div class="row head-actions"><span class="sub">@ScopeText</span></div> }
     </div>
 
-    @if (decider)
+    @if (decider && Modes.Expert)
     {
         <div class="nt-tabs" role="tablist">
             <button type="button" role="tab" class="@(tab == "todo" ? "on" : "")" @onclick='() => tab = "todo"'>À approuver @if (todo.Count > 0) { <span class="nt-cnt">@todo.Count</span> }</button>
@@ -33,7 +44,7 @@ else
         </div>
     }
 
-    <div class="ap-bar">
+    <div class="ap-bar @(Modes.Simple ? "sh-hide" : "")">
         @if (zones.Count > 1)
         {
             <select aria-label="Zone" @bind="zone"><option value="">Toutes les zones</option>@foreach (var z in zones) { <option value="@z">@z</option> }</select>
@@ -59,11 +70,19 @@ else
                     <div class="ap-bd">@(req.AuthorId == me ? "Envoyée par vous" : req.AuthorName) · n° @req.Number@(ZoneOf(req) is { Length: > 0 } zn ? " · " + zn : "")</div>
                     <div class="ap-sum">@Chips(req)</div>
                 </div>
-                <div class="ap-rt"><span>@Notifs.When(req.CreatedUtc, DateTime.UtcNow, tz)</span>@Status(req)</div>
+                @if (Modes.Simple && req.Open && CanDecide(req))
+                {
+                    @* mode Simple : décider depuis la ligne ; « Refuser » ouvre le détail sur le motif, obligatoire *@
+                    <div class="ap-rt ap-now" @onclick:stopPropagation="true">
+                        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => { Open(req.Id); refusing = true; }">Refuser</button>
+                        <button type="button" class="btn sm" disabled="@busy" @onclick="() => ApproveRow(req)">Approuver</button>
+                    </div>
+                }
+                else { <div class="ap-rt"><span>@Notifs.When(req.CreatedUtc, DateTime.UtcNow, tz)</span>@Status(req)</div> }
             </div>
         }
     </div>
-    @if (decider && tab == "todo" && list.Count > 0) { <p class="hint" style="margin-top:10px">Les plus anciennes d'abord. Un rappel part après @reminderHours h sans réponse.</p> }
+    @if (decider && tab == "todo" && list.Count > 0 && Modes.Expert) { <p class="hint" style="margin-top:10px">Les plus anciennes d'abord. Un rappel part après @reminderHours h sans réponse.</p> }
 }
 
 @if (opened is { } r0)
@@ -215,7 +234,8 @@ else
         done = rows.Where(r => !r.Open || !deciderOf.Contains(r.Id)).ToList();
         mediaById = allMedia.ToDictionary(m => m.Id);
         if (!decider) tab = "mine";
-        else if (tab == "mine") tab = "todo";
+        else if (tab == "mine" || (Modes.Simple && !simpleSet)) tab = Modes.Simple ? "all" : "todo";
+        simpleSet = true;
     }
 
     private void OnChanged() { later?.Dispose(); later = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 500, Timeout.Infinite); }
@@ -223,7 +243,7 @@ else
 
     private List<ApprovalRequest> Shown()
     {
-        var src = !decider ? rows.OrderBy(r => r.Open ? 0 : 1).ThenByDescending(r => r.CreatedUtc).ToList() : tab == "todo" ? todo : done;
+        var src = !decider ? rows.OrderBy(r => r.Open ? 0 : 1).ThenByDescending(r => r.CreatedUtc).ToList() : tab == "todo" ? todo : tab == "done" ? done : todo.Concat(done).ToList();   // « all » : mode Simple, tout d'abord
         var q = query.Trim();
         return src.Where(r => zone.Length == 0 || ZoneOf(r) == zone)
             .Where(r => q.Length == 0 || r.Title.Contains(q, StringComparison.CurrentCultureIgnoreCase) || r.AuthorName.Contains(q, StringComparison.CurrentCultureIgnoreCase) || ("n° " + r.Number).Contains(q, StringComparison.CurrentCultureIgnoreCase) || r.Number.ToString() == q).ToList();
@@ -271,6 +291,22 @@ else
     {
         openId = null; refusing = false; refuseError = false; comment = ""; error = null;
         Nav.NavigateTo("approvals", replace: true);
+    }
+
+    private bool simpleSet;
+
+    /// <summary>Mode Simple : approuver depuis la ligne, sans ouvrir le détail (décision de l'utilisateur du 12 novembre 2026).</summary>
+    private async Task ApproveRow(ApprovalRequest r)
+    {
+        if (busy) return;
+        busy = true;
+        try
+        {
+            var err = await Service.Approve(Store.ClientId, r.Id, Ctx.UserId, Ctx.DisplayName, admin, "");
+            if (err != null) Toast.Error(err);
+            else { Toast.Ok($"Approuvée : {r.Title} est publié."); Load(); }
+        }
+        finally { busy = false; }
     }
 
     private async Task Approve()

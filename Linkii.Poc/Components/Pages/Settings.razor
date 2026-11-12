@@ -18,11 +18,12 @@
 <div class="page-head">
     <div>
         <h1>Réglages</h1>
-        <p class="sub sc-intro">Paramètres de votre organisation. Ils s'appliquent à tous les écrans.</p>
+        @if (Modes.Simple) { <p class="sh-meta"><span>@name · plan @(growth ? "Pro" : "Essential")</span></p> }   @* mode Simple allégé (§234) : une seule page, Utilisation puis Plan et paiement *@
+        else { <p class="sub sc-intro">Paramètres de votre organisation. Ils s'appliquent à tous les écrans.</p> }
     </div>
 </div>
 
-<div class="rg-layout @(sub ? "sub" : "hub")">
+<div class="rg-layout @(sub ? "sub" : "hub") @(Modes.Simple ? "sh-one" : "")">
     <nav class="rg-nav" aria-label="Sections des réglages">
         @foreach (var (group, items) in VisibleGroups)
         {
@@ -40,8 +41,25 @@
     <div class="rg-main">
         <button type="button" class="rg-back" @onclick="() => sub = false"><Ico Name="chevron-right" Size="16" /> Réglages</button>
         <div @oninput="Touch" @onchange="Changed" @onclick="Clicked">
-        @switch (Tab)
+        @switch (Modes.Simple ? "simple" : Tab)
         {
+            case "simple":
+                @* mode Simple (maquette petites-pages-simple-allegee.html) : pas de rubriques, quatre chiffres puis l'abonnement en une carte *@
+                <section class="sr-sec">
+                    <h3>Utilisation</h3>
+                    <div class="sr-use">
+                        <a class="sr-u" href="/"><i><Ico Name="monitor" Size="18" /></i><span><b>@screenCount <em>écran@(screenCount > 1 ? "s" : "")</em></b><small>@(screenCount - screensOnline) hors ligne</small></span></a>
+                        <a class="sr-u" href="/playlists"><i><Ico Name="play-box" Size="18" /></i><span><b>@playlistCount <em>liste@(playlistCount > 1 ? "s" : "") de lecture</em></b><small>@playlistsUsed diffusée@(playlistsUsed > 1 ? "s" : "")</small></span></a>
+                        <a class="sr-u" href="/media"><i><Ico Name="image" Size="18" /></i><span><b>@(imageCount + videoCount) <em>média@(imageCount + videoCount > 1 ? "s" : "")</em></b><small>@Helpers.FormatSize(imageBytes + videoBytes)</small></span></a>
+                        <a class="sr-u" href="/applications"><i><Ico Name="apps" Size="18" /></i><span><b>@integrationCount <em>application@(integrationCount > 1 ? "s" : "") utilisée@(integrationCount > 1 ? "s" : "")</em></b><small>sur @integrationTotal disponibles</small></span></a>
+                    </div>
+                </section>
+                <section class="sr-sec">
+                    <h3>Plan et paiement</h3>
+                    <SubscriptionPanel Compact="true" />
+                </section>
+                break;
+
             case "utilisation":
                 <div class="rg-ph"><h2>Utilisation</h2><p>Ce que contient votre organisation aujourd'hui.</p></div>
 
@@ -510,7 +528,7 @@
     };
 
     // Mode simple : Utilisation, Veille et luminosité, Compte et confidentialité seulement (le reste est en mode expert).
-    private static readonly string[] SimpleTabs = { "utilisation", "veille", "ia", "publicite", "approbation", "abonnement", "compte" };
+    private static readonly string[] SimpleTabs = { "utilisation", "abonnement" };   // 12 novembre 2026 : Utilisation et Plan et paiement seulement, sur une seule page
     private bool aiWrite = true, aiReview = true, aiMedia = true, aiAssistant = true, aiWeb = true;   // fonctions de l'IA (réglages de l'organisation)
     private AiState aiState = new(AiStatus.Off, 0, 0, false);
     private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");   // Publicité : une fonction activable, comme la veille
