@@ -62,6 +62,13 @@
     var lr = drag.list.getBoundingClientRect();
     drag.left = lr.left;
     drag.loop = drag.root.querySelector('.le-loop');
+    // La zone de dépôt est toute la colonne de gauche, du haut de la liste au bas de la fenêtre : on peut lâcher n'importe où dans cette colonne.
+    drag.zone = drag.root.querySelector('.le-rows') || drag.list;
+    if (drag.kind === 'add' && drag.zone !== drag.list) {
+      var zt = drag.zone.getBoundingClientRect().top;
+      drag.zone.style.minHeight = Math.max(0, w.innerHeight - zt - 16) + 'px';
+      drag.zone.classList.add('le-dropzone');
+    }
     drag.raf = w.requestAnimationFrame(tick);
   }
 
@@ -73,16 +80,19 @@
 
   // Décale les lignes selon la position du pointeur : les autres lignes glissent pour faire place
   function update() {
+    var zb = (drag.zone || drag.list).getBoundingClientRect();   // zone de dépôt : toute la colonne des lignes, sur toute la hauteur
     if (drag.empty) {   // liste vide : la zone de dépôt s'allume, le contenu s'y pose en position 1
-      var zr = drag.list.getBoundingClientRect();
-      var inz = drag.kind === 'add' && drag.px > zr.left && drag.px < zr.right && drag.py > zr.top - 30 && drag.py < zr.bottom + 30;
+      var inz = drag.kind === 'add' && drag.px > zb.left - 30 && drag.px < zb.right + 30 && drag.py > zb.top - 30 && drag.py < zb.bottom + 30;
       drag.k = inz ? 0 : null;
       drag.list.classList.toggle('over', inz);
-      drag.target = inz ? { x: zr.left + 20, y: zr.top + 20 } : null;
+      if (drag.zone) drag.zone.classList.toggle('over', inz);
+      var er = drag.list.getBoundingClientRect();
+      drag.target = inz ? { x: er.left + 20, y: er.top + 20 } : null;
       return;
     }
     var lr = drag.list.getBoundingClientRect(), px = drag.px, py = drag.py;
-    var over = px > lr.left - 30 && px < lr.right + 30 && py > lr.top - 60 && py < lr.bottom + 60;
+    var over = px > zb.left - 30 && px < zb.right + 30 && py > Math.min(lr.top, zb.top) - 60 && py < zb.bottom + 30;
+    if (drag.kind === 'add' && drag.zone) drag.zone.classList.toggle('over', over);
     var k = drag.k;
     if (over || drag.kind === 'move') {
       k = 0;
@@ -146,12 +156,14 @@
     if (dr.el) { dr.el.style.visibility = ''; dr.el.classList.remove('dragging'); }
     shifted(dr).forEach(function (el) { el.style.transition = ''; });
     dr.list.classList.remove('over');
+    if (dr.zone) { dr.zone.classList.remove('over', 'le-dropzone'); dr.zone.style.minHeight = ''; }
     d.body.classList.remove('le-dragging');
   }
 
   // La ligne vient se poser à sa place ; puis, une fois la page redessinée, tout est remis en état
   function land(dr, needPage) {
     var t = dr.target;
+    if (dr.zone) { dr.zone.classList.remove('over', 'le-dropzone'); dr.zone.style.minHeight = ''; }
     d.body.classList.remove('le-dragging');
     var g = dr.ghost;
     g.classList.add('land');
