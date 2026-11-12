@@ -194,3 +194,10 @@ S = rep(S, '/* état vide */', `/* Petites pages */
 @media (max-width:900px){.zp-old{grid-template-columns:1fr}.zp-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.np-when{display:none}}
 /* état vide */`);
 out('petites-pages-simple-allegee.html', 'Réglages, Notifications, Approbations, Mon compte allégés (mode Simple)', S);
+
+/* ---- Fenêtres de la page Écrans, menu d'un écran, contenus d'une application ---- */
+let W = A.slice(0, cutA) + fs.readFileSync(SP + '/win-js.src', 'utf8');
+W = rep(W, '<button type="button" class="mk-btn on" data-v="mine">Applications</button><button type="button" class="mk-btn" data-v="store" style="border-radius:0;border-left:0">Store</button><button type="button" class="mk-btn" data-v="app">Une application</button>',
+  '<button type="button" class="mk-btn on" data-v="menu">Menu ⋯</button><button type="button" class="mk-btn" data-v="pair" style="border-radius:0;border-left:0">Connecter</button><button type="button" class="mk-btn" data-v="edit" style="border-radius:0;border-left:0">Modifier</button><button type="button" class="mk-btn" data-v="kiosk" style="border-radius:0;border-left:0">Borne</button><button type="button" class="mk-btn" data-v="contents">Contenus</button>');
+W = rep(W, '/* état vide */', fs.readFileSync(SP + '/win.css', 'utf8') + String.fromCharCode(10) + '/* état vide */');
+out('ecrans-fenetres-simple-allegee.html', 'Fenêtres des écrans et contenus allégés (mode Simple)', W);

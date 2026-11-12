@@ -431,13 +431,18 @@ else
 @if (showPair)
 {
     <div class="modal-backdrop" @onclick="() => showPair = false"></div>
-    <div class="imp-bottom lx-pair" role="dialog" aria-modal="true" aria-labelledby="pair-title">
+    <div class="imp-bottom lx-pair @(Modes.Simple ? "sm-pair" : "")" role="dialog" aria-modal="true" aria-labelledby="pair-title">
         <div class="imp-head">
             <h3 id="pair-title">@(pairKiosk ? "Connecter une borne interactive" : "Connecter un écran")</h3>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => showPair = false"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="imp-body">
-            @if (!pairKiosk)
+            @if (!pairKiosk && Modes.Simple)
+            {
+                @* mode Simple allégé (§235) : le code d'abord ; l'installation du player et les options sont repliées plus bas *@
+                <p class="pair-lead">Saisissez le code à 6 chiffres affiché sur l'écran.</p>
+            }
+            else if (!pairKiosk)
             {
                 @* Étape 1 : installer le player sur l'écran (logos officiels, un clic télécharge ou ouvre) *@
                 <div class="pair-step"><i>1</i> Installez le player sur l'écran <span>(une fois par écran)</span></div>
@@ -467,7 +472,7 @@ else
                         @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
                     </select>
                 </div>
-                @if (pairAreas.Count > 1)
+                @if (pairAreas.Count > 1 && Modes.Expert)   @* aires et zones : mode expert *@
                 {
                     @* l'aire se choisit ici (plus d'aire ouverte dans le menu) : pré-remplie avec le filtre en cours, ou la dernière aire utilisée *@
                     <div class="dw-field wide">
@@ -477,7 +482,7 @@ else
                         </select>
                     </div>
                 }
-                @if (FreeZones.Count > 1)
+                @if (FreeZones.Count > 1 && Modes.Expert)
                 {
                     <div class="dw-field wide">
                         <label for="pair-zone">Zone</label>
@@ -486,12 +491,35 @@ else
                         </select>
                     </div>
                 }
+                @if (Modes.Simple)
+                {
+                    @if (!pairKiosk)
+                    {
+                        <button type="button" class="se-fold dw-field wide" aria-expanded="@(pairHelp ? "true" : "false")" @onclick="() => pairHelp = !pairHelp"><Ico Name="@(pairHelp ? "chevron" : "chevron-right")" Size="16" /><b>L'écran n'affiche pas de code ?</b><small>Installer le player</small></button>
+                        @if (pairHelp)
+                        {
+                            <div class="dw-field wide se-foldb">
+                                <p class="hint" style="margin:0 0 10px">Installez le player une fois sur l'écran : il affichera son code.</p>
+                                <div class="pair-picks">
+                                    <a class="pair-pick" href="/download/windows" download><PlayerLogo Kind="Windows" Size="28" /><b>Windows</b><small>@PickMeta(winPlayer, ".msi")</small></a>
+                                    <a class="pair-pick" href="/download/android" download><PlayerLogo Kind="Android" Size="28" /><b>Android / TV</b><small>@PickMeta(androidPlayer, ".apk")</small></a>
+                                    <a class="pair-pick" href="/player/" target="_blank" rel="noopener"><PlayerLogo Kind="Navigateur" Size="28" /><b>Navigateur</b><small>Sans installation</small></a>
+                                    <a class="pair-pick" href="/download/linux" download><PlayerLogo Kind="Linux" Size="28" /><b>Linux</b><small>@PickMeta(linuxPlayer, ".tar.gz")</small></a>
+                                </div>
+                            </div>
+                        }
+                    }
+                    <button type="button" class="se-fold dw-field wide" aria-expanded="@(pairMore ? "true" : "false")" @onclick="() => pairMore = !pairMore"><Ico Name="@(pairMore ? "chevron" : "chevron-right")" Size="16" /><b>Plus d'options</b><small>Orientation, fenêtre de test</small></button>
+                }
+                @if (Modes.Expert || pairMore)
+                {
                 <div class="dw-field wide"><ScreenFormat Spec="pairSpec" /></div>
                 @* PC Windows en test : coupé, l'écran s'ouvre en fenêtre dès l'appairage (pas besoin de relancer le player) *@
                 <div class="dw-field wide sp-row pair-full">
                     <div class="grow"><b>Plein écran</b><small>Coupé : sur un PC Windows, le player passe en fenêtre à la taille de la résolution dès l'appairage. Pratique pour tester plusieurs écrans sur un PC.</small></div>
                     <button type="button" class="switch navy @(pairFull ? "on" : "")" role="switch" aria-checked="@(pairFull ? "true" : "false")" aria-label="Plein écran" @onclick="() => pairFull = !pairFull"><span></span></button>
                 </div>
+                }
                 @if (Modes.Expert) { <CalendarPick Calendars="calendars" @bind-Value="pairCal" PlaylistName="PlName" Id="pair-cal" Class="wide" Style="" Empty="Facultatif : l'écran suivra ce calendrier ; hors programmation, sa liste par défaut." /> }
             </div>
             @if (pairPrice is { } pp) { <p class="hint" style="margin:12px 0 0"><Ico Name="info" Size="14" /> @pp</p> }
@@ -667,7 +695,9 @@ else
 
 @if (editing is { } eid)
 {
-    <ScreenEditor ScreenId="eid" OnClose="CloseEdit" />
+    @* mode Simple : « Ajouter un écran sur ce PC » passe du menu ⋯ à la section Avancé de la fenêtre *@
+    @if (Modes.Simple && screens.FirstOrDefault(x => x.Id == eid) is { } epc && DeviceConfig.IsPc(epc)) { <ScreenEditor ScreenId="eid" OnClose="CloseEdit" OnAddOnPc="() => { CloseEdit(); OpenAddOnPc(epc); }" /> }
+    else { <ScreenEditor ScreenId="eid" OnClose="CloseEdit" /> }
 }
 
 @if (liveFor is { } liveId)
@@ -1850,8 +1880,9 @@ else if (wallEdit is { } wid)
                                 <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                                 @* menu regroupé : diffusion, publication, appareil, organisation, suppression *@
                                 <div class="kebab-menu" role="menu">
-                                    <button type="button" role="menuitem" @onclick="() => Edit(gs)"><Ico Name="sliders" Size="16" /> Éditer l'écran</button>
-                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
+                                    @* mode Simple (§235) : seules les entrées « sm-keep » restent : Modifier l'écran, Simuler, Supprimer *@
+                                    <button type="button" role="menuitem" class="sm-keep" @onclick="() => Edit(gs)"><Ico Name="sliders" Size="16" /> @(Modes.Simple ? "Modifier l'écran" : "Éditer l'écran")</button>
+                                    <button type="button" role="menuitem" class="sm-keep" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
                                     <button type="button" role="menuitem" class="app-only" disabled="@(gwhy != null)" title="@gwhy" @onclick='() => { menuFor = null; OpenLive(gs, "preview"); }'><Ico Name="eye" Size="16" /> Aperçu en direct</button>
                                     <button type="button" role="menuitem" class="app-only" disabled="@(gwhy != null)" title="@gwhy" @onclick='() => { menuFor = null; OpenLive(gs, null); }'><Ico Name="@(gpaused ? "play" : "pause")" Size="16" /> @(gpaused ? "Reprendre" : "Mettre en pause")</button>
                                     @if (Modes.Expert && !HCtx.IsClientMember) { <button type="button" role="menuitem" @onclick='() => { menuFor = null; Nav.NavigateTo($"history?screen={gs.Id}"); }'><Ico Name="clock" Size="16" /> Historique</button> }
@@ -1886,8 +1917,8 @@ else if (wallEdit is { } wid)
                                     @if (FolderOps) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (gs.Id, gs.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
                                     @if (Modes.Expert && canAssign) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; assigning = gs; }"><Ico Name="users" Size="16" /> Attribuer…</button> }
                                     @if (Modes.Expert && otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => OpenAreaMove(gs)"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
-                                    <hr />
-                                    <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { gs }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                                    <hr class="sm-keep" />
+                                    <button type="button" role="menuitem" class="danger sm-keep" @onclick="() => { menuFor = null; deleting = new() { gs }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                                 </div>
                             }
                         </div>
@@ -3069,6 +3100,8 @@ else if (wallEdit is { } wid)
     /// <summary>« moniteur 2 » : seulement pour un PC qui a plusieurs moniteurs ou plusieurs écrans.</summary>
     private string? MonitorText(Screen s) =>
         DeviceConfig.IsPc(s) && (s.DeviceMonitors.Count > 1 || PcCount(s) > 1) ? (s.Windowed ? $"fenêtre, moniteur {s.Monitor}" : $"moniteur {s.Monitor}") : null;
+
+    private bool pairHelp, pairMore;   // mode Simple : sections repliées de « Connecter un écran »
 
     private void OpenAddOnPc(Screen s)
     {

@@ -12,7 +12,7 @@
 @* Édition d'un écran : nom, playlist, format et widgets (horloge, météo) posés librement sur un aperçu à l'échelle.
    La liste de lecture et les widgets partent sur l'écran à la publication ; le format s'applique dès l'enregistrement. *@
 <div class="modal-backdrop" @onclick="Close"></div>
-<div class="modal app-modal wg-modal" role="dialog" aria-modal="true" aria-labelledby="se-title">
+<div class="modal app-modal wg-modal @(Modes.Simple ? "sm-edit" : "")" role="dialog" aria-modal="true" aria-labelledby="se-title">
     <div class="modal-head">
         <span class="app-ico" style="--app-c:#0B1F3A"><Ico Name="monitor" Size="22" /></span>
         <div class="grow" style="min-width:0">
@@ -28,11 +28,11 @@
             else
             {
                 <div class="row" style="gap:8px;flex-wrap:nowrap">
-                    <h3 id="se-title" class="se-title">@(string.IsNullOrWhiteSpace(name) ? "Écran" : name)</h3>
+                    <h3 id="se-title" class="se-title">@(Modes.Simple ? "Modifier l'écran" : string.IsNullOrWhiteSpace(name) ? "Écran" : name)</h3>
                     <button type="button" class="btn ghost sm icon" title="Renommer l'écran" aria-label="Renommer l'écran" @onclick="StartHeadRename"><Ico Name="edit" Size="15" /></button>
                 </div>
             }
-            <small>Modifier l'écran</small>
+            <small>@(Modes.Simple ? name : "Modifier l'écran")</small>
         </div>
         @* mode simple : pas de luminosité ; il reste « Paramètres de l'écran ». Veille et planning ne sont plus ici : les extinctions et diffusions
            programmées passent par le calendrier assigné (Programmations, liste « Calendrier » sous le découpage). *@
@@ -40,7 +40,7 @@
         {
             <button type="button" class="modal-x @(DimActive ? "set" : "")" aria-label="Luminosité et contraste" title="Luminosité et contraste : @DimSummary" @onclick="OpenDimDialog"><Ico Name="@(DimActive ? "sun" : "sun-off")" Size="20" /></button>
         }
-        <button type="button" class="modal-x" aria-label="Paramètres de l'écran" title="Paramètres de l'écran" @onclick="() => advanced = true"><Ico Name="sliders" Size="20" /></button>
+        @if (Modes.Expert) { <button type="button" class="modal-x" aria-label="Paramètres de l'écran" title="Paramètres de l'écran" @onclick="() => advanced = true"><Ico Name="sliders" Size="20" /></button> }   @* mode Simple : dans « Avancé » *@
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
     </div>
     <div class="modal-body wg-body">
@@ -112,6 +112,28 @@
             {
                 <p class="hint wall-note">Cet écran est la place @(screenWallPos is { } wp ? Helpers.WallLabel(wp, wall.WallCols, wall.WallRows) : "?") du mur « @wall.Name » : il joue la liste du mur, en écran plein. Pour le sortir du mur, dissolvez le mur depuis la page Écrans.</p>
             }
+            else if (Modes.Simple)
+            {
+                @* mode Simple allégé (§235, maquette ecrans-fenetres-simple-allegee.html) : nom, liste de lecture, orientation ; le reste est replié *@
+                <div class="dw se-simple">
+                    <div class="dw-field"><label for="se-name">Nom</label><input id="se-name" maxlength="80" @bind="name" /></div>
+                    @if (Def.Sizes.Length == 1)
+                    {
+                        <div class="dw-field">
+                            <label for="se-pl">Liste de lecture</label>
+                            <select id="se-pl" @onchange="e => SetZone(0, Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
+                                <option value="" selected="@(zonePl[0] == null)">— Aucune liste de lecture —</option>
+                                @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == zonePl[0])">@p.Name</option> }
+                            </select>
+                        </div>
+                    }
+                    else { <p class="hint">Cet écran est découpé en @Def.Sizes.Length zones : choisissez la liste de chaque zone sur l'aperçu.</p> }
+                </div>
+                <ScreenFormat Spec="spec" OnChange="StateHasChanged" Compact="true" />
+                <button type="button" class="se-fold" aria-expanded="@(simpleMore ? "true" : "false")" @onclick='() => { simpleMore = !simpleMore; if (simpleMore && tab == "screen") tab = "bands"; }'>
+                    <Ico Name="@(simpleMore ? "chevron" : "chevron-right")" Size="16" /><b>Bandeaux et widgets</b><small>@(BandCount + widgets.Count == 0 ? "Aucun" : $"{BandCount + widgets.Count} posé{(BandCount + widgets.Count > 1 ? "s" : "")}")</small>
+                </button>
+            }
             else if (zones.Count(z => !z.IsWall) > 1)
             {
                 @* zone de son aire : classement seulement, rien à publier *@
@@ -124,7 +146,7 @@
                     </div>
                 </div>
             }
-            @if (wall == null)
+            @if (wall == null && (Modes.Expert || simpleMore))
             {
                 <div class="se-utabs" role="tablist">
                     <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'><Ico Name="monitor" Size="18" /> Écran</button>
@@ -133,7 +155,8 @@
                 </div>
             }
 
-            @if (tab == "screen" || wall != null)
+            @if (Modes.Simple && wall == null && !simpleMore) { }   @* mode Simple : bandeaux et widgets repliés *@
+            else if ((tab == "screen" && Modes.Expert) || wall != null)
             {
                 <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" />
                 @if (wall == null && Modes.Expert)
@@ -182,7 +205,21 @@
                     </div>
                 }
                 @if (available.Count == 0 && widgets.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
-            }            @foreach (var e in errors) { <div class="err">@e</div> }
+            }
+            @if (Modes.Simple && wall == null)
+            {
+                <button type="button" class="se-fold" aria-expanded="@(simpleAdv ? "true" : "false")" @onclick="() => simpleAdv = !simpleAdv">
+                    <Ico Name="@(simpleAdv ? "chevron" : "chevron-right")" Size="16" /><b>Avancé</b><small>Résolution, miroir, démarrage</small>
+                </button>
+                @if (simpleAdv)
+                {
+                    <div class="se-foldb">
+                        <div class="sp-row"><div class="grow"><b>Résolution, miroir, démarrage</b><small>Les paramètres de l'appareil.</small></div><button type="button" class="btn ghost sm" @onclick="() => advanced = true">Régler…</button></div>
+                        @if (OnAddOnPc.HasDelegate) { <div class="sp-row"><div class="grow"><b>Ajouter un écran sur ce PC</b><small>Nouvel écran déjà appairé, sans code.</small></div><button type="button" class="btn ghost sm" @onclick="() => OnAddOnPc.InvokeAsync()">Ajouter…</button></div> }
+                    </div>
+                }
+            }
+            @foreach (var e in errors) { <div class="err">@e</div> }
         </div>
     </div>
     <div class="modal-foot">
@@ -205,7 +242,8 @@
         {
             <button class="btn ghost" @onclick="Close">Annuler</button>
             <button class="btn ghost" disabled="@saving" @onclick="() => Save(false)">Enregistrer</button>
-            <button class="btn" disabled="@saving" @onclick="() => confirmPublish = true">@(needsApproval ? "Enregistrer et demander l'approbation" : "Enregistrer et publier")</button>
+            @if (Modes.Simple && !needsApproval) { <button class="btn publish-btn" disabled="@saving" @onclick="() => confirmPublish = true"><Ico Name="upload" Size="16" /> Publier</button> }
+            else { <button class="btn" disabled="@saving" @onclick="() => confirmPublish = true">@(needsApproval ? "Enregistrer et demander l'approbation" : "Enregistrer et publier")</button> }
         }
     </div>
 </div>
@@ -267,6 +305,9 @@
 @code {
     [Parameter, EditorRequired] public Guid ScreenId { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Mode Simple, PC Windows : « Ajouter un écran sur ce PC » (section Avancé), à la place de l'entrée du menu ⋯.</summary>
+    [Parameter] public EventCallback OnAddOnPc { get; set; }
+    private bool simpleMore, simpleAdv;
 
     private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;

@@ -166,7 +166,7 @@ else
                 }
             </div>
         }
-        <div class="apd-bar">
+        <div class="apd-bar @(SimplePage ? "sh-hide" : "")">
             @if (IsPlans) { <span class="apd-sum">@items.Count plan@(items.Count > 1 ? "s" : "") · @items.Count(i => i.Screens > 0) affiché@(items.Count(i => i.Screens > 0) > 1 ? "s" : "")</span> }
             else { <span class="apd-sum">@(narrowed ? $"{shown.Count} sur " : "")@items.Count contenu@(items.Count > 1 ? "s" : "") · @shown.Count(i => i.On) actif@(shown.Count(i => i.On) > 1 ? "s" : "")</span> }
             <span class="grow"></span>
@@ -183,6 +183,13 @@ else
         }
         else
         {
+            @if (SimplePage)
+            {
+                @* mode Simple allégé (§235) : plus de tableau ni d'activation en lot ; une ligne par contenu, avec son interrupteur *@
+                <div class="sr-list">@foreach (var it in shown.Take(300)) { @SimpleRow(it) }</div>
+            }
+            else
+            {
             <div class="lx-tbl-wrap">
                 <table class="lx-tbl apd-tbl">
                     @if (IsPlans) { <thead><tr><th>Plan</th><th>Étages</th><th>Appareils</th><th class="num">Affiché</th><th>Modifié le</th><th>État</th><th></th></tr></thead> }
@@ -218,6 +225,7 @@ else
                     }
                 </table>
             </div>
+            }
             @if (!grouped && shown.Count > 300) { <p class="apd-sum" style="margin-top:8px">@shown.Count contenus : les 300 premiers sont affichés, utilisez la recherche.</p> }
         }
     }
@@ -493,6 +501,24 @@ else
         Reload();
         Toast.Ok($"{todo.Count} contenu{(todo.Count > 1 ? "s" : "")} {(on ? "activé" : "désactivé")}{(todo.Count > 1 ? "s" : "")}.");
     }
+
+    /// <summary>Mode Simple : un contenu = une ligne (nom, où il sert, interrupteur Actif).</summary>
+    private RenderFragment SimpleRow(Item row) => __builder =>
+    {
+        var use = !row.On ? "Désactivé : n'apparaît plus nulle part"
+            : row.Error is { Length: > 0 } er ? "Erreur : " + er
+            : row.Kind != "media" ? "Disponible"
+            : row.Lists.Count == 0 ? "Pas encore diffusé"
+            : $"Dans {row.Lists.Count} liste{(row.Lists.Count > 1 ? "s" : "")} · sur {row.Screens} écran{(row.Screens > 1 ? "s" : "")}";
+        <div class="sr-item @(row.On ? "" : "off")">
+            <AppIcon Id="@AppId" Small="true" />
+            <div class="sr-in">
+                @if (row.Instance) { <a href="/apps/instance/@row.Key" title="Ouvrir @row.Name">@row.Name</a> } else { <b>@row.Name</b> }
+                <small>@use</small>
+            </div>
+            <button type="button" class="switch @(row.On ? "on" : "")" role="switch" aria-checked="@(row.On ? "true" : "false")" aria-label="@(row.On ? "Désactiver" : "Activer") @row.Name" @onclick="() => ToggleContent(row)"><span></span></button>
+        </div>
+    };
 
     private RenderFragment RowView(Item row) => __builder =>
     {

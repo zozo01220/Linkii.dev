@@ -35,7 +35,7 @@ else
     var touchKey = Kiosk.TouchKey(k.TouchStyle);
     var touchMoved = k.TouchX != null && k.TouchY != null;
     <div class="modal-backdrop" @onclick="Close"></div>
-    <div class="modal app-modal wg-modal kp-win" role="dialog" aria-modal="true" aria-labelledby="kp-title">
+    <div class="modal app-modal wg-modal kp-win @(Modes.Simple ? "sm-edit" : "")" role="dialog" aria-modal="true" aria-labelledby="kp-title">
         <div class="modal-head">
             <span class="app-ico" style="--app-c:#C45A00"><Ico Name="hand" Size="22" /></span>
             <div class="grow" style="min-width:0">
@@ -50,7 +50,7 @@ else
                 else
                 {
                     <div class="row" style="gap:8px;flex-wrap:nowrap">
-                        <h3 id="kp-title" class="se-title">@name</h3>
+                        <h3 id="kp-title" class="se-title">@(Modes.Simple ? "Modifier la borne" : name)</h3>
                         <button type="button" class="btn ghost sm icon" title="Renommer la borne" aria-label="Renommer la borne" @onclick="StartHeadRename"><Ico Name="edit" Size="15" /></button>
                         <span class="badge @(Offline ? "hors-ligne" : "en-ligne")">@(Offline ? "Hors ligne" : "En ligne")</span>
                         <span class="kiosk-tag badge neutre"><Ico Name="hand" Size="12" /> Borne · @(portrait ? "Portrait" : "Paysage")</span>
@@ -58,10 +58,10 @@ else
                         else if (Pending) { <span class="badge mise-a-jour" title="Liste interactive, réglages, liste de lecture ou widgets modifiés depuis la dernière publication">À publier</span> }
                     </div>
                 }
-                <small>Modifier la borne</small>
+                <small>@(Modes.Simple ? name : "Modifier la borne")</small>
             </div>
             @* mode simple : pas de planning *@
-            <button type="button" class="modal-x" aria-label="Réglages de la borne" title="Réglages de la borne" @onclick="() => parOpen = true"><Ico Name="sliders" Size="20" /></button>
+            @if (Modes.Expert) { <button type="button" class="modal-x" aria-label="Réglages de la borne" title="Réglages de la borne" @onclick="() => parOpen = true"><Ico Name="sliders" Size="20" /></button> }   @* mode Simple : dans « Avancé » *@
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
         </div>
 
@@ -154,6 +154,11 @@ else
                 @if (tab == "screen")
                 {
                     <div class="kd-pane">
+                        @if (Modes.Simple)
+                        {
+                            @* mode Simple allégé (§235, maquette ecrans-fenetres-simple-allegee.html) : le nom, la liste ; l'écran d'attente et l'avancé sont repliés *@
+                            <div class="kd-blk"><div class="dw-field"><label for="k-name">Nom</label><input id="k-name" maxlength="80" value="@name" @onchange="e => { headValue = e.Value?.ToString() ?? string.Empty; SaveHeadRename(); }" /></div></div>
+                        }
                         <div class="kd-blk">
                             <h4>Liste interactive</h4>
                             @if (list != null)
@@ -176,15 +181,12 @@ else
                             }
                         </div>
 
-                        <div class="kd-blk">
-                            <h4>Format de l'écran</h4>
-                            <div class="kp-seg kd-seg" role="group" aria-label="Orientation">
-                                <button type="button" class="@(!portrait ? "on" : "")" @onclick='() => SetOrientation("landscape")'><i class="ori l"></i> Paysage</button>
-                                <button type="button" class="@(portrait ? "on" : "")" @onclick='() => SetOrientation("portrait")'><i class="ori p"></i> Portrait</button>
-                            </div>
-                            <span class="kp-h kd-hint">Le format s'applique dès l'enregistrement.</span>
-                        </div>
-
+                        @if (Modes.Simple)
+                        {
+                            <button type="button" class="se-fold" aria-expanded="@(kWait ? "true" : "false")" @onclick="() => kWait = !kWait"><Ico Name="@(kWait ? "chevron" : "chevron-right")" Size="16" /><b>Écran d'attente</b><small>Bouton « Touchez l'écran », widgets</small></button>
+                        }
+                        @if (Modes.Expert || kWait)
+                        {
                         <div class="kd-blk">
                             <h4>Inactivité</h4>
                             <p class="kp-h kd-d">Le premier toucher interrompt la diffusion et ouvre la liste interactive.</p>
@@ -201,7 +203,25 @@ else
                             </div>
                             <span class="kp-h kd-hint">Affiché au centre tant que personne n'a touché la borne ; glissez-le sur l'aperçu pour le déplacer.@if (touchMoved) { <text> </text><button type="button" class="kd-link" @onclick="ResetTouch">Recentrer</button> }</span>
                             @if (Modes.Expert) { <CalendarPick Calendars="calendars" @bind-Value="calendarId" PlaylistName="PlaylistName" Id="k-cal" Empty="Aucun : en inactivité, la borne diffuse toujours sa propre liste." /> }
+                            @if (Modes.Simple) { <div class="sp-row" style="margin-top:12px"><div class="grow"><b>Widgets de l'écran d'attente</b><small>@(widgets.Count == 0 ? "Aucun" : widgets.Count + " posé" + (widgets.Count > 1 ? "s" : ""))</small></div><button type="button" class="btn ghost sm" @onclick='() => tab = "widgets"'>Choisir…</button></div> }
                         </div>
+                        }
+                        @if (Modes.Simple)
+                        {
+                            <button type="button" class="se-fold" aria-expanded="@(kAdv ? "true" : "false")" @onclick="() => kAdv = !kAdv"><Ico Name="@(kAdv ? "chevron" : "chevron-right")" Size="16" /><b>Avancé</b><small>Format, retours automatiques, verrouillage</small></button>
+                        }
+                        @if (Modes.Expert || kAdv)
+                        {
+                        <div class="kd-blk">
+                            <h4>Format de l'écran</h4>
+                            <div class="kp-seg kd-seg" role="group" aria-label="Orientation">
+                                <button type="button" class="@(!portrait ? "on" : "")" @onclick='() => SetOrientation("landscape")'><i class="ori l"></i> Paysage</button>
+                                <button type="button" class="@(portrait ? "on" : "")" @onclick='() => SetOrientation("portrait")'><i class="ori p"></i> Portrait</button>
+                            </div>
+                            <span class="kp-h kd-hint">Le format s'applique dès l'enregistrement.</span>
+                        </div>
+                        @if (Modes.Simple) { <div class="kd-blk"><div class="sp-row"><div class="grow"><b>Retours automatiques, verrouillage, appareil</b><small>Les réglages de la borne.</small></div><button type="button" class="btn ghost sm" @onclick="() => parOpen = true">Régler…</button></div></div> }
+                        }
                     </div>
                 }
                 else
@@ -209,6 +229,7 @@ else
                     @* widgets de l'écran d'inactivité : posés sur l'aperçu par glisser-déposer (ou un clic) ; une seule liste, d'abord les widgets déjà sur l'écran (régler, retirer), puis ceux qu'on peut ajouter (+) *@
                     var free = available.ToList();
                     <div class="kd-pane">
+                        @if (Modes.Simple) { <button type="button" class="kd-link" style="margin-top:12px" @onclick='() => tab = "screen"'>‹ Retour</button> }
                         @if (free.Count > 6) { <input id="wg-search" type="text" placeholder="Rechercher" aria-label="Rechercher un widget" @bind="search" @bind:event="oninput" style="margin:14px 0 8px" /> }
                         @if (widgets.Count + free.Count > 0)
                         {
@@ -267,7 +288,8 @@ else
             {
                 <button class="btn ghost" @onclick="Close">Annuler</button>
                 <button class="btn ghost" disabled="@saving" @onclick="() => SaveAll(false)">Enregistrer</button>
-                <button class="btn" disabled="@saving" @onclick="() => confirmPublish = true">@(needsApproval ? "Enregistrer et demander l'approbation" : "Enregistrer et publier")</button>
+                @if (Modes.Simple && !needsApproval) { <button class="btn publish-btn" disabled="@saving" @onclick="() => confirmPublish = true"><Ico Name="upload" Size="16" /> Publier</button> }
+                else { <button class="btn" disabled="@saving" @onclick="() => confirmPublish = true">@(needsApproval ? "Enregistrer et demander l'approbation" : "Enregistrer et publier")</button> }
             }
         </div>
     </div>
@@ -277,7 +299,7 @@ else
     {
         @* réglages de la borne en trois onglets : Visiteur · Verrouillage · Appareil *@
         <div class="kp-veil over" @onclick="() => parOpen = false"></div>
-        <div class="kp-drawer kd-par over" role="dialog" aria-modal="true" aria-labelledby="kp-par-t">
+        <div class="kp-drawer kd-par over @(Modes.Simple ? "sm-center" : "")" role="dialog" aria-modal="true" aria-labelledby="kp-par-t">
             <div class="kp-dh"><h2 id="kp-par-t">Réglages de la borne</h2><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => parOpen = false"><Ico Name="x" Size="20" /></button></div>
             <div class="se-utabs kd-ptabs" role="tablist">
                 <button type="button" role="tab" aria-selected="@(parTab == "vis" ? "true" : "false")" class="@(parTab == "vis" ? "on" : "")" @onclick='() => parTab = "vis"'>Visiteur</button>
@@ -388,6 +410,7 @@ else
 }
 
 @code {
+    private bool kWait, kAdv;   // mode Simple : sections repliées de « Modifier la borne »
     [Parameter] public Guid Id { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
