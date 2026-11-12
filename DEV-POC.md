@@ -3913,3 +3913,4 @@ Les trois pages n'ont plus d'onglets ; ce qu'elles montrent se choisit dans le m
 - La liste déroulante des types (Tout, Images, Vidéos…) et le bouton « Importer » de la colonne sont retirés ; la recherche reste. Le code des anciens types (`LibTabs`, `FileEntries`, `CompoEntries`, `LibAction`) reste en place, inutilisé.
 - Un premier jet (commit 24cb613) limitait la colonne aux applications du menu : remplacé.
 - Compilé, non vérifié dans l’application. À regarder : l’ajout d’une Image ou d’une Vidéo vide puis le choix du média dans sa fenêtre, et le glisser-déposer d’une application.
+- **Retouche** : dans la colonne « Ajouter », le pictogramme de chaque application est centré dans sa pastille (`.le-it .ic.app > *` en position statique).
