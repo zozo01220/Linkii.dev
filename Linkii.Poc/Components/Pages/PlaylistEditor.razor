@@ -189,22 +189,15 @@
 
         @if (!readOnlyHere && !mini)
         {
-            var tabs = LibTabs().ToList();
-            var shown = tabs.Where(t => t.Count > 0).ToList();   // types vides masqués
-            if (shown.Count == 0 && tabs.Count > 0) shown.Add(tabs[0]);
-            if (libTab != "all" && !shown.Any(t => t.Key == libTab)) libTab = "all";
+            @* Colonne « Ajouter » (§240) : uniquement les applications installées, celles de la page Applications. Les médias, les pages web et les compositions
+               ne sont plus proposés directement : on ajoute l'application, puis on la configure. *@
             <aside class="le-side" aria-label="Ajouter à la liste" @ref="libRoot">
                 <div class="le-sidehd">
                     <h3>Ajouter</h3>
-                    @LibAction()
                 </div>
-                <p class="le-hint">Glissez un contenu dans la liste, ou cliquez dessus pour l'ajouter à la fin.</p>
+                <p class="le-hint">Glissez une application dans la liste, ou cliquez dessus pour l'ajouter à la fin.</p>
                 <div class="le-tools">
-                    <label class="search-box"><Ico Name="search" Size="16" /><input @ref="libSearchInput" placeholder="Rechercher" aria-label="Rechercher dans les contenus" @bind="libSearch" @bind:event="oninput" /></label>
-                    <select class="le-sel" aria-label="Type de contenu" @bind="libTab">
-                        <option value="all">Tout</option>
-                        @foreach (var t in shown) { <option value="@t.Key">@t.Label</option> }
-                    </select>
+                    <label class="search-box"><Ico Name="search" Size="16" /><input @ref="libSearchInput" placeholder="Rechercher" aria-label="Rechercher une application" @bind="libSearch" @bind:event="oninput" /></label>
                 </div>
                 <div class="le-list">@CatList()</div>
             </aside>
@@ -1020,7 +1013,7 @@ else
     }
 
     // ---------- Bibliothèque en onglets par type (§186) ----------
-    private string libTab = "all", libSearch = "";
+    private string libTab = "app", libSearch = "";   // la colonne ne propose plus que les applications (§240)
     private int? pickAt;
     private bool mini, presMenu;
     private int onScreens;
@@ -1028,10 +1021,7 @@ else
     private static readonly string[] PresApps = { "ms-powerpoint", "google-slides", "google-docs", "pdf", "canva" };
     private static readonly HashSet<string> StdApps = new(new[] { "image", "video", Compositions.AppId, "webpage" }.Concat(PresApps));
     private bool Has(string appId) => enabledApps.Any(a => a.Id == appId);
-    // Colonne « Ajouter » : seules les applications du groupe « Applications » du menu (celles que la personne a installées), pas les applications de base
-    // installées d'office (diaporamas d'images et de vidéos, etc.). Un calendrier (« cal-… ») ou un Drive (« drv-… ») du menu ouvre l'application correspondante.
-    private HashSet<string> menuAppIds = new();
-    private IEnumerable<AppManifest> OtherApps => enabledApps.Where(a => !StdApps.Contains(a.Id) && menuAppIds.Contains(a.Id));
+    private IEnumerable<AppManifest> OtherApps => enabledApps.Where(a => !StdApps.Contains(a.Id));
     private bool Match(string? name) => libSearch.Length == 0 || (name ?? "").Contains(libSearch, StringComparison.OrdinalIgnoreCase);
 
     private sealed record LibTab(string Key, string Label, string Color, int Count);
@@ -1126,17 +1116,14 @@ else
             .Select(m => new CatEntry("inst:" + m.Id, m.Name, Svc.Find(m.AppId)?.Name ?? "", m, null, () => AddInstance(m, TakePick()), UsedItem(m.Id)));
 
     private IEnumerable<CatEntry> AppEntries() =>
-        OtherApps.Where(a => Match(a.Name) || Match(a.Summary))
-            .Select(a => new CatEntry("app:" + a.Id, a.Name, a.Summary ?? a.Category ?? "Application", null, a.Id, () => AddEmpty(a, TakePick()), UsedApp(a.Id)));
+        enabledApps.Where(a => Match(a.Name) || Match(a.Summary))
+            .Select(a => new CatEntry("app:" + a.Id, a.Name, a.Summary ?? a.Category ?? "Application", null, a.Id,
+                () => { if (a.Id == "webpage" || PresApps.Contains(a.Id)) NewWithForm(a.Id); else AddEmpty(a, TakePick()); }, UsedApp(a.Id)));
 
     private IEnumerable<CatEntry> CatEntries(string kind)
     {
-        if (kind is "all" or "img") foreach (var e in FileEntries("image")) yield return e;
-        if (kind is "all" or "vid") foreach (var e in FileEntries("video")) yield return e;
-        if (kind is "all" or "cmp") foreach (var e in CompoEntries()) yield return e;
-        if (kind is "all" or "pres") foreach (var e in InstanceEntries(presItems)) yield return e;
-        if (kind is "all" or "web") foreach (var e in InstanceEntries(webItems)) yield return e;
-        if (kind is "all" or "app") foreach (var e in AppEntries()) yield return e;
+        // §240 : plus de médias, de compositions, de présentations ni de pages web proposés directement ; seulement les applications installées
+        foreach (var e in AppEntries()) yield return e;
     }
 
     private string CatEmpty() => libTab switch
@@ -1146,7 +1133,7 @@ else
         "cmp" => "Aucune composition. « Nouvelle composition » ouvre l'éditeur ; elle s'ajoutera à cette liste.",
         "pres" => "Aucune présentation. « Nouvelle présentation » en importe une (PowerPoint, Google Slides, PDF, Canva…).",
         "web" => "Aucune page web. « Nouvelle page web » en crée une.",
-        "app" => "Aucune application installée." + (Modes.Expert ? " Ajoutez-en depuis le Store." : ""),
+        "app" => libSearch.Length > 0 ? "Aucune application trouvée" : "Aucune application installée." + (Modes.Expert ? " Ajoutez-en depuis le Store." : ""),
         _ => libSearch.Length > 0 ? "Aucun contenu trouvé" : "Aucun contenu pour l'instant."
     };
 
@@ -1402,7 +1389,6 @@ else
         pickFiles = MediaLib.PickableFiles().Where(m => m.Type is "image" or "video" && (m.Status == null || m.Status == "processing" && freshFiles.Contains(m.Id)) && !hidden.Contains(m.Id)).OrderByDescending(m => m.AddedUtc).ToList();
         canImport = !readOnlyHere && Store.Read(d => d.Access.CanWrite(LevelPages.Media));
         enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget && !a.IsFeature).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();   // les deux modes : toutes les applications attribuées (hors widgets d'écran), §186
-        menuAppIds = Store.Read(AppMenu.Shown).Select(id => id.StartsWith("cal-") ? "agenda" : id.StartsWith("drv-") ? "drive" : id).ToHashSet();
         compoItems = Svc.Instances(Compositions.AppId);
         compoFiles = MediaLib.PickableFiles().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
         // pages web et présentations déjà réglées (un contenu ajouté à vide et jamais fini n'est pas proposé)
