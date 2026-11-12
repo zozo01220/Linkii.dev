@@ -90,7 +90,7 @@
             @* trois boutons au-dessus de la liste : aperçu, publier (icône seule : blanc si tout est à jour, orange s'il y a une modification), menu ⋯ *@
             <div class="le-bar"><div class="le-act">
                 <button type="button" class="le-ib" title="Aperçu" aria-label="Aperçu de la liste" disabled="@(pl.Draft.Count == 0)" @onclick="() => trying = true"><Ico Name="eye" Size="20" /></button>
-                <button type="button" class="btn @(needs ? "publish-btn" : "ghost") le-pub" title="@pubTip" aria-label="@pubTip" disabled="@(pl.Draft.Count == 0 && air == 0 && chosen == 0)" @onclick="OpenPublish"><Ico Name="upload" Size="18" />@if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
+                <button type="button" class="btn @(needs ? "publish-btn" : "ghost") le-pub" title="@pubTip" aria-label="@pubTip" disabled="@(pl.Draft.Count == 0 && air == 0 && chosen == 0)" @onclick="OpenPublish"><Ico Name="upload" Size="18" />@if (needs) { <span class="le-pubn" aria-hidden="true">@(chosen > 0 ? chosen : pend)</span> } @if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
                 <span class="le-dw">
                     <button type="button" class="le-ib" title="Plus" aria-label="Plus d'actions" aria-haspopup="menu" aria-expanded="@(listMenu ? "true" : "false")" @onclick="() => listMenu = !listMenu"><NxIco Name="more" Size="20" /></button>
                     @if (listMenu)
@@ -171,6 +171,8 @@
                                                 <button type="button" role="menuitem" @onclick="() => { rowMenu = null; OpenSettings(pl, row.It, row.M); }"><Ico Name="edit" Size="16" /> Modifier…</button>
                                                 <button type="button" role="menuitem" @onclick="() => { rowMenu = null; OpenProgramming(row); }"><Ico Name="calendar" Size="16" /> Programmer la diffusion…</button>
                                                 <button type="button" role="menuitem" title="Le même contenu passe une seconde fois, juste après" @onclick="() => { rowMenu = null; Duplicate(pl, row.It); }"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                                                @* §236 : « Désactiver » quitte la fenêtre du contenu pour ce menu *@
+                                                <button type="button" role="menuitem" title="@(row.It.Off ? "Le contenu repasse dans la boucle" : "Le contenu reste dans la liste mais la boucle le saute")" @onclick="() => { rowMenu = null; ToggleOff(pl, row.It); }"><Ico Name="@(row.It.Off ? "eye" : "eye-off")" Size="16" /> @(row.It.Off ? "Réactiver" : "Désactiver")</button>
                                                 <hr />
                                                 <button type="button" role="menuitem" class="danger" @onclick="() => { rowMenu = null; RemoveWithUndo(pl, row.It); }"><Ico Name="trash" Size="16" /> Retirer de la liste</button>
                                             </div>
@@ -268,29 +270,12 @@ else
 }
 
 @{
-    // Onglets « Contenu / QR code » de la fenêtre d'un contenu, en tête de la colonne de droite (comme « Écran / Widgets » de l'éditeur d'écran).
-    // Partagés par la création (galerie → fenêtre de l'app) et par la fenêtre de réglage d'un contenu existant.
+    // Fenêtre d'un contenu (§236) : plus d'onglets. La programmation et le QR code sont des sections de la colonne des champs, sous ceux de l'application.
     var qrAngle = mPlacement != "full";   // un contenu en angle ou en bandeau n'a pas de QR code : l'onglet est grisé
     var qrScans = mItem != null && scanCounts.TryGetValue(mItem.Id, out var qc) ? qc.Scans : 0;
-    RenderFragment qrTabs = @<div class="se-utabs" role="tablist" aria-label="Réglage du contenu">
-        <button type="button" role="tab" aria-selected="@(mTab == "content" ? "true" : "false")" class="@(mTab == "content" ? "on" : "")" @onclick='() => mTab = "content"'><Ico Name="monitor" Size="18" /> Contenu</button>
-        @if (mItem != null)
-        {
-            <button type="button" role="tab" aria-selected="@(mTab == "prog" ? "true" : "false")" class="@(mTab == "prog" ? "on" : "")" @onclick='() => mTab = "prog"'>
-                <Ico Name="calendar" Size="18" /> Programmation
-                @if (mSchedOn) { <span class="tab-dot" title="Une période est définie"></span> }
-            </button>
-        }
-        <button type="button" role="tab" aria-selected="@(mTab == "qr" ? "true" : "false")" class="@(mTab == "qr" && !qrAngle ? "on" : "")" disabled="@qrAngle"
-                title="@(qrAngle ? "Le QR code n'est disponible que pour un contenu en pleine page." : "")" @onclick='() => mTab = "qr"'>
-            <Ico Name="qr" Size="18" /> QR code
-            @if (!growth) { <span class="tab-lock"><Ico Name="lock" Size="12" /> Pro</span> }
-            else if (mQrOn && qrScans > 0) { <small class="on-badge">@qrScans</small> }
-        </button>
-    </div>;
-    // Onglet « Programmation » : période de diffusion du contenu (début et fin facultatifs), colonne de droite comme « QR code »
+    // Section « Programmation » : période de diffusion du contenu (début et fin facultatifs)
     RenderFragment progPane = @<div class="ci-prog">
-        <h4 class="ci-t">Période de diffusion</h4>
+        <h4 class="ci-t">Programmation</h4>
         <div class="ci-seg" role="radiogroup" aria-label="Période de diffusion">
             <button type="button" role="radio" aria-checked="@(mSchedOn ? "false" : "true")" class="@(mSchedOn ? "" : "on")" @onclick="() => mSchedOn = false">Toujours</button>
             <button type="button" role="radio" aria-checked="@(mSchedOn ? "true" : "false")" class="@(mSchedOn ? "on" : "")" @onclick="() => mSchedOn = true">Période</button>
@@ -305,10 +290,6 @@ else
             </div>
         }
         else { <p class="hint">Le contenu passe en boucle sans limite de date.</p> }
-    </div>;
-    RenderFragment qrPreview = @<div>
-        <h4 class="ci-t">Aperçu de l'écran</h4>
-        <QrPlacer Format="@mFormat" FormatChanged="SetFormatValue" Media="(newForm ?? itemForm)?.PickedMedia() ?? mMedia" Fit="@((newForm ?? itemForm)?.PreviewFit ?? "contain")" All="media" Text="@(growth && mQrOn ? QrText : null)" X="mQrX" Y="mQrY" Size="mQrSize" Label="@mQrLabel" OnMoved="QrMoved" />
     </div>;
     RenderFragment qrPane = @<div class="ci-qr">
         <div class="ci-qr-master">
@@ -331,35 +312,33 @@ else
             </div>
         }
     </div>;
-    // l'onglet ouvert remplace la colonne de configuration : « QR code » ou « Programmation » (sans aperçu du contenu pour ce dernier)
-    bool otherOpen = (mTab == "qr" && !qrAngle) || (mTab == "prog" && mItem != null);
-    RenderFragment otherPane = mTab == "prog" ? progPane : qrPane;
-    RenderFragment? otherPreview = mTab == "prog" ? null : qrPreview;
+    // QR code : seulement pour un contenu en pleine page ; sans le plan requis, la section verrouillée n'est montrée qu'en mode Expert
+    bool qrShown = !qrAngle && (growth || Modes.Expert);
+    RenderFragment qrSection = @<section class="ci-listset" aria-label="QR code"><h4 class="ci-t">QR code @if (growth && mQrOn && qrScans > 0) { <small class="on-badge" title="Scans comptés">@qrScans</small> }</h4>@qrPane</section>;
+    RenderFragment newExtra = qrShown ? qrSection : (RenderFragment)(_ => { });
 }
 
 @if (newApp != null && Current is { } target)
 {
     var a = newApp;
     <div class="modal-backdrop" @onclick="() => newApp = null"></div>
-    <div class="modal app-modal ci-modal" role="dialog" aria-modal="true" aria-labelledby="new-app-title">
+    <div class="modal app-modal ci-modal ci-std" role="dialog" aria-modal="true" aria-labelledby="new-app-title">
         <div class="modal-head">
             <AppIcon Id="@a.Id" />
             <div class="grow">
-                <div class="ci-title"><h3 id="new-app-title">@(newName ?? a.Name)</h3> <button type="button" class="btn ghost sm icon" title="Renommer" aria-label="Renommer" @onclick="() => newForm?.OpenRename()"><Ico Name="edit" Size="15" /></button></div>
+                <div class="ci-title"><h3 id="new-app-title" class="cs-name" title="Cliquer pour renommer" @onclick="() => newForm?.OpenRename()">@(newName ?? a.Name)</h3> <button type="button" class="btn ghost sm icon cs-pen" title="Renommer" aria-label="Renommer" @onclick="() => newForm?.OpenRename()"><Ico Name="edit" Size="15" /></button></div>
                 <small>Ajout à « @target.Name »</small>
             </div>
             @if (a.HasAdvanced) { <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="() => newForm?.OpenAdvanced()"><Ico Name="sliders" Size="20" /></button> }
-            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => newApp = null"><Ico Name="x" Size="20" /></button>
+            <span class="cs-sep"></span>
+            @if (AppInstanceForm.NeedsTest(a)) { <button class="btn ghost" @onclick="() => newForm!.Test()">Tester</button> }
+            <button class="btn" @onclick="SaveNew">Ajouter</button>
+            <button type="button" class="modal-x" aria-label="Fermer sans ajouter" title="Fermer sans ajouter" @onclick="() => newApp = null"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="modal-body">
             <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" OnRenamed="n => newName = n" @ref="newForm"
-                             ConfTabs="qrTabs" OtherTab="@otherOpen" OtherPane="@otherPane" OtherPreview="@otherPreview" PreviewQr="PreviewQr" PreviewQrMoved="QrMoved" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" PreviewFormat="@mFormat" PreviewFormatChanged="SetFormatValue" />
+                             Extra="newExtra" PreviewQr="PreviewQr" PreviewQrMoved="QrMoved" PreviewPortrait="false" PreviewPlace="mPlacement" PreviewFormat="@mFormat" PreviewFormatChanged="SetFormatValue" />
 </div>
-        <div class="modal-foot">
-            <button class="btn ghost" @onclick="() => newApp = null">Annuler</button>
-            @if (AppInstanceForm.NeedsTest(a)) { <button class="btn ghost" @onclick="() => newForm!.Test()">Tester</button> }
-            <button class="btn" @onclick="SaveNew">Ajouter à la liste de lecture</button>
-        </div>
     </div>
 }
 
@@ -439,36 +418,36 @@ else
 {
     var isApp = mMedia?.AppId != null;
     <div class="modal-backdrop" @onclick="CloseSettings"></div>
-    <div class="modal @(isApp ? "app-modal ci-modal" : "")" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        @if (isApp)
-        {
-            <div class="modal-head">
-                <AppIcon Id="@mMedia!.AppId" />
-                <div class="grow">
-                    <div class="ci-title"><h3 id="modal-title">@(itemName ?? mMedia.Name)</h3> <button type="button" class="btn ghost sm icon" title="Renommer" aria-label="Renommer" @onclick="() => itemForm?.OpenRename()"><Ico Name="edit" Size="15" /></button></div>
-                    <small>@Svc.Find(mMedia.AppId)?.Name</small>
-                </div>
-                @if (Svc.Find(mMedia.AppId) is { HasAdvanced: true }) { <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="() => itemForm?.OpenAdvanced()"><Ico Name="sliders" Size="20" /></button> }
-                @if (mPlaylist.Draft.Count > 1)
+    @* Fenêtre standard d'un contenu (§236, maquette fenetre-contenu-standard.html) : proportions fixes, champs à gauche, zone d'affichage paysage à droite,
+       « Enregistrer » dans l'en-tête. Le même gabarit sert aux applications, aux images et aux vidéos. *@
+    <div class="modal app-modal ci-modal ci-std" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-head">
+            @if (isApp) { <AppIcon Id="@mMedia!.AppId" /> }
+            else if (mMedia != null) { <span class="cs-th"><MediaThumb Media="mMedia" All="media" /></span> }
+            <div class="grow">
+                @if (isApp)
                 {
-                    <button type="button" class="modal-x" aria-label="Contenu précédent" title="Contenu précédent" @onclick="() => StepSettings(-1)"><Ico Name="chevron-left" Size="20" /></button>
-                    <button type="button" class="modal-x" aria-label="Contenu suivant" title="Contenu suivant" @onclick="() => StepSettings(1)"><Ico Name="chevron-right" Size="20" /></button>
+                    <div class="ci-title"><h3 id="modal-title" class="cs-name" title="Cliquer pour renommer" @onclick="() => itemForm?.OpenRename()">@(itemName ?? mMedia!.Name)</h3> <button type="button" class="btn ghost sm icon cs-pen" title="Renommer" aria-label="Renommer" @onclick="() => itemForm?.OpenRename()"><Ico Name="edit" Size="15" /></button></div>
+                    <small>@Svc.Find(mMedia!.AppId)?.Name</small>
                 }
-                <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseSettings"><Ico Name="x" Size="20" /></button>
-            </div>
-        }
-        else
-        {
-            <div class="row" style="align-items:flex-start">
-                <div class="grow"><h3 id="modal-title">Paramètres du contenu</h3><p class="hint"><b>@mMedia?.Name</b> · @(mMedia?.Type == "video" ? "vidéo" : "image")</p></div>
-                @if (mPlaylist.Draft.Count > 1)
+                else
                 {
-                    <button type="button" class="modal-x" aria-label="Contenu précédent" title="Contenu précédent" @onclick="() => StepSettings(-1)"><Ico Name="chevron-left" Size="20" /></button>
-                    <button type="button" class="modal-x" aria-label="Contenu suivant" title="Contenu suivant" @onclick="() => StepSettings(1)"><Ico Name="chevron-right" Size="20" /></button>
+                    <div class="ci-title"><h3 id="modal-title">@mMedia?.Name</h3></div>
+                    <small>@(mMedia?.Type == "video" ? "Vidéo" : "Image")</small>
                 }
             </div>
-        }
-        @* réglages de ce contenu dans la liste (position, durée) : pour une app, à droite de l'aperçu (colonne de configuration), sinon sous le titre *@
+            @if (isApp && Svc.Find(mMedia!.AppId) is { HasAdvanced: true }) { <button type="button" class="modal-x cs-adv" aria-label="Options avancées" title="Options avancées" @onclick="() => itemForm?.OpenAdvanced()"><Ico Name="sliders" Size="20" /></button> }
+            @if (mPlaylist.Draft.Count > 1)
+            {
+                <button type="button" class="modal-x" aria-label="Contenu précédent" title="Contenu précédent" @onclick="() => StepSettings(-1)"><Ico Name="chevron-left" Size="20" /></button>
+                <button type="button" class="modal-x" aria-label="Contenu suivant" title="Contenu suivant" @onclick="() => StepSettings(1)"><Ico Name="chevron-right" Size="20" /></button>
+            }
+            <span class="cs-sep"></span>
+            @if (isApp && Svc.Find(mMedia!.AppId) is { } ma && AppInstanceForm.NeedsTest(ma)) { <button class="btn ghost" @onclick="() => itemForm!.Test()">Tester</button> }
+            <button class="btn" @onclick="SaveAll">Enregistrer</button>
+            <button type="button" class="modal-x" aria-label="Fermer sans enregistrer" title="Fermer sans enregistrer" @onclick="CloseSettings"><Ico Name="x" Size="20" /></button>
+        </div>
+        @* réglages de ce contenu dans la liste (durée) : dans la colonne des champs, sous ceux de l'application *@
         @{
             RenderFragment listSettings = @<div class="dw">
             @if (mPlacement != "full")
@@ -496,40 +475,46 @@ else
                 <div class="dw-field"><label>Durée d'affichage (secondes)</label><input type="number" min="1" max="86400" @bind="mSeconds" /></div>
             }
             </div>;
-            RenderFragment appExtra = @<section class="ci-listset" aria-label="Dans cette liste de lecture"><h4 class="ci-t">Dans cette liste de lecture</h4>@listSettings</section>;
+            RenderFragment appExtra = @<div class="cs-more">
+                <section class="ci-listset" aria-label="Dans cette liste de lecture"><h4 class="ci-t">Dans cette liste de lecture</h4>@listSettings</section>
+                <section class="ci-listset" aria-label="Programmation">@progPane</section>
+                @if (qrShown) { @qrSection }
+            </div>;
         }
         @if (isApp)
         {
             <div class="modal-body">
-                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" ConfTabs="qrTabs" OtherTab="@otherOpen" OtherPane="@otherPane" OtherPreview="@otherPreview" PreviewQr="PreviewQr" PreviewQrMoved="QrMoved" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" PreviewFormat="@mFormat" PreviewFormatChanged="SetFormatValue" OnOpenEditor="OpenCompositionEditor" @ref="itemForm" />
+                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" PreviewQr="PreviewQr" PreviewQrMoved="QrMoved" PreviewPortrait="false" PreviewPlace="mPlacement" PreviewFormat="@mFormat" PreviewFormatChanged="SetFormatValue" OnOpenEditor="OpenCompositionEditor" @ref="itemForm" />
             </div>
         }
-        else if (mItem != null)
+        else
         {
-            @* contenu d'une image ou d'une vidéo : deux onglets, comme ceux d'une app (Contenu / Programmation) *@
-            <div class="se-utabs" role="tablist" aria-label="Réglage du contenu">
-                <button type="button" role="tab" aria-selected="@(mTab == "prog" ? "false" : "true")" class="@(mTab == "prog" ? "" : "on")" @onclick='() => mTab = "content"'><Ico Name="monitor" Size="18" /> Contenu</button>
-                <button type="button" role="tab" aria-selected="@(mTab == "prog" ? "true" : "false")" class="@(mTab == "prog" ? "on" : "")" @onclick='() => mTab = "prog"'>
-                    <Ico Name="calendar" Size="18" /> Programmation
-                    @if (mSchedOn) { <span class="tab-dot" title="Une période est définie"></span> }
-                </button>
+            @* image ou vidéo : la même fenêtre, l'aperçu du fichier dans la zone d'affichage *@
+            <div class="modal-body">
+                <div class="ci">
+                    <div class="ci-cols">
+                        <div class="ci-left">
+                            <section class="ci-prev" aria-label="Aperçu">
+                                <div class="pv-box">
+                                    @if (mMedia?.FileName != null)
+                                    {
+                                        <div class="cp-stage">
+                                            @if (mMedia.Type == "video") { <video src="/media/@mMedia.FileName" controls muted playsinline preload="metadata"></video> }
+                                            else { <img src="/media/@mMedia.FileName?w=1280" alt="" /> }
+                                        </div>
+                                    }
+                                    else { <div class="cp-empty"><b>Aucun aperçu</b></div> }
+                                </div>
+                            </section>
+                        </div>
+                        <section class="ci-conf" aria-label="Réglages">
+                            <section class="ci-listset cs-first" aria-label="Dans cette liste de lecture"><h4 class="ci-t">Dans cette liste de lecture</h4>@listSettings</section>
+                            <section class="ci-listset" aria-label="Programmation">@progPane</section>
+                        </section>
+                    </div>
+                </div>
             </div>
-            @if (mTab == "prog") { @progPane } else { @listSettings }
         }
-        else { @listSettings }
-        <div class="@(isApp ? "modal-foot" : "modal-actions") pfx-mfoot">
-            @* actions de la carte (anciennement dans le menu ⋮) : retirer, dupliquer, désactiver *@
-            @if (!readOnlyHere)
-            {
-                <button type="button" class="btn ghost pfx-del" @onclick="() => { var it = mItem; var p = mPlaylist; CloseSettings(); RemoveWithUndo(p!, it!); }"><Ico Name="trash" Size="15" /> Retirer du fil</button>
-                <button type="button" class="btn ghost" title="Le même contenu passe une seconde fois, juste après" @onclick="() => { var it = mItem; var p = mPlaylist; CloseSettings(); Duplicate(p!, it!); }"><Ico Name="copy" Size="15" /> Dupliquer</button>
-                <button type="button" class="btn ghost" title="@(mItem?.Off == true ? "Le contenu repasse dans la boucle" : "Le contenu reste dans la liste mais la boucle le saute")" @onclick="() => { var it = mItem; var p = mPlaylist; CloseSettings(); ToggleOff(p!, it!); }"><Ico Name="@(mItem?.Off == true ? "eye" : "eye-off")" Size="15" /> @(mItem?.Off == true ? "Réactiver" : "Désactiver")</button>
-            }
-            <span class="grow"></span>
-            <button class="btn ghost" @onclick="CloseSettings">Annuler</button>
-            @if (isApp && Svc.Find(mMedia!.AppId) is { } ma && AppInstanceForm.NeedsTest(ma)) { <button class="btn ghost" @onclick="() => itemForm!.Test()">Tester</button> }
-            <button class="btn" @onclick="SaveAll">Enregistrer</button>
-        </div>
     </div>
 }
 
