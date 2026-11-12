@@ -47,6 +47,54 @@
         }
     </div>
 }
+else if (PlaylistId != null)
+{
+    @* Fenêtre « Aperçu » d'une liste, allégée : le nom, le format dans un menu de l'en-tête (paysage à l'ouverture), l'image sur toute la largeur,
+       une fine barre segmentée (un segment par contenu, nom au survol) et une ligne d'icônes. Ni colonne de droite, ni pied. Commandes remplies par sim.js (mode « ext »). *@
+    <div class="modal-backdrop @(Stacked ? "picker-backdrop" : "")" @onclick="Close"></div>
+    <div class="modal app-modal sim-dlg sim-lite nx-pv" role="dialog" aria-modal="true" aria-labelledby="sim-title">
+        <div class="modal-head">
+            <h3 id="sim-title" class="grow">@title</h3>
+            @if (!missing)
+            {
+                <label class="nx-fmt" title="Afficher l'aperçu au format de…"><Ico Name="monitor" Size="16" />
+                    <select aria-label="Format de l'aperçu" value="@fmt" @onchange='e => SetFormat(e.Value?.ToString() ?? "")'>
+                        @foreach (var f in Formats) { <option value="@f.Key">@f.Label</option> }
+                        @if (likes.Count > 0)
+                        {
+                            <optgroup label="Comme un écran">@foreach (var l in likes) { <option value="@l.Key">@l.Label</option> }</optgroup>
+                        }
+                    </select>
+                </label>
+            }
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            @if (missing)
+            {
+                <div class="empty"><div class="big">Rien à simuler</div><p>Cette liste n'existe plus.</p></div>
+            }
+            else
+            {
+                <div class="nx-stage">
+                    @if (emptyList) { <div class="nx-blank">La liste est vide :<br />ajoutez un contenu pour voir l'aperçu.</div> }
+                    else { <div class="sim-host" @ref="host"></div> }
+                </div>
+                <div class="nx-tl" role="list" aria-label="Contenus de la boucle"></div>
+                <div class="nx-ctl">
+                    <button type="button" class="nx-ib" data-a="prev" title="Contenu précédent" aria-label="Contenu précédent"></button>
+                    <button type="button" class="nx-ib play" data-a="play"></button>
+                    <button type="button" class="nx-ib" data-a="next" title="Contenu suivant" aria-label="Contenu suivant"></button>
+                    <span class="nx-time mono">@(emptyList ? "0:00 / 0:00" : "")</span>
+                    <span class="grow"></span>
+                    <button type="button" class="nx-ib" data-a="sound"></button>
+                    <button type="button" class="nx-ib" data-a="full" title="Plein écran" aria-label="Plein écran"></button>
+                </div>
+                <div class="nx-note sim-note" hidden></div>
+            }
+        </div>
+    </div>
+}
 else
 {
 @if (!Inline) { <div class="modal-backdrop @(Stacked ? "picker-backdrop" : "")" @onclick="Close"></div> }
@@ -203,7 +251,7 @@ else
     private bool Solo => PlaylistId == null && WallZoneId == null;
     private bool missing, mounted, dirty = true;
     private bool emptyList;   // onglet Aperçu d'une liste vide : rien à jouer, la scène le dit
-    private bool Ext => Inline && PlaylistId != null;   // commandes de la page (sim.js « ext ») au lieu de la barre du simulateur
+    private bool Ext => PlaylistId != null;   // liste (onglet ou fenêtre) : commandes de la page (sim.js « ext ») au lieu de la barre du simulateur
     private string title = "", foot = "", token = "";
     private string? warn;
     private readonly List<(string Css, string Text, string? Tip)> badges = new();
@@ -403,12 +451,13 @@ else
             return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls, Portrait = portrait, OnScreen = on?.Id, Empty = p.Draft.Count == 0 };
         });
         if (info == null) { missing = true; title = "Aperçu"; return; }
-        title = $"Aperçu · « {info.Name} »";
+        title = info.Name;
         likes = info.Screens.Select(s => ($"like:{s.Id}", $"{s.Name} · {(s.Orientation == "portrait" ? "portrait" : "paysage")}", s.Orientation, PlayerFeed.Resolution(s), 1, 1))
             .Concat(info.Walls.Select(x => ($"like:{x.Zone.Id}", $"{x.Zone.Name} · mur {x.Zone.WallCols} × {x.Zone.WallRows}", x.First!.Orientation, PlayerFeed.Resolution(x.First), x.Zone.WallCols, x.Zone.WallRows)))
             .ToList();
-        fmt = Ext && info.OnScreen is { } sid ? $"like:{sid}" : info.Portrait ? "port" : "land";
-        emptyList = Ext && info.Empty;
+        // onglet : le format de l'écran qui diffuse la liste ; fenêtre : toujours paysage à l'ouverture (rien n'est mémorisé)
+        fmt = !Inline ? "land" : info.OnScreen is { } sid ? $"like:{sid}" : info.Portrait ? "port" : "land";
+        emptyList = info.Empty;
         ApplyFormat();
         foot ="Joue la liste telle qu'elle est, même non publiée.";
     }
