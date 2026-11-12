@@ -3903,3 +3903,11 @@ Les trois pages n'ont plus d'onglets ; ce qu'elles montrent se choisit dans le m
 - **Historique** (`Historique.razor`) : période dans la ligne sous le titre, loupe et export CSV en icône ; pastille rouge du nombre d’erreurs sur l’onglet Diagnostic. Catégories, niveaux et listes Membre / Écran restent dans la rangée de pastilles. Les jours sortent du cadre, chaque ligne porte un point de couleur au lieu de la pastille ronde. Les quatre compteurs du Diagnostic restent, sans cadre.
 - **Écarts avec la maquette** : la bascule cartes / liste garde ses deux boutons (composant `ViewToggle`) au lieu d’une icône ; les tableaux restent des tableaux (allégés par le style) ; les aires gardent leurs boutons au survol au lieu d’un menu ⋯.
 - **Non vérifié** : compilé sans erreur, rien n’a été regardé dans l’application.
+- **Retouche du même jour** : dans Organisation, les vues en liste (Membres et Aires) n’ont plus de cadre blanc derrière le tableau (`.xp .card.og-list` transparent, tableau arrondi posé sur le fond de la page).
+- **Retouches suivantes** : page Écrans en vue liste, plus de cadre blanc derrière la liste (`lx-blk-main` transparent aussi avec `.pl-grid.list`) ; les tableaux d’Organisation reprennent le style du tableau des Listes de lecture et des Listes interactives (`lx-tbl` : en-têtes sur fond gris clair, lignes serrées).
+
+## 240. Page d’une liste : la colonne « Ajouter » ne propose que les applications installées (12 novembre 2026) : demande de l’utilisateur.
+
+- `PlaylistEditor.razor` : le type « Applications » de la colonne « Ajouter » (et « Tout ») ne liste plus toutes les applications attribuées, mais seulement celles du groupe « Applications » du menu (`AppMenu.Shown`, `menuAppIds`) ; un calendrier (`cal-…`) ou un Drive (`drv-…`) du menu donne « Calendrier partagé » ou « Dossier Drive ». Les applications de base installées d’office disparaissent donc de la colonne : Diaporama images, Diaporama vidéos, et aussi Flux RSS, Météo, etc. tant qu’elles ne sont pas dans le menu.
+- Les types Images, Vidéos, Compositions, Présentations et Pages web de la liste déroulante ne changent pas ; les contenus déjà dans une liste non plus.
+- Compilé, non vérifié dans l’application.
