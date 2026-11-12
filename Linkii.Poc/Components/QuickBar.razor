@@ -4,19 +4,25 @@
 @inject AssistantPanel Panel
 @implements IDisposable
 
-@* Barre des accès rapides (ordinateur seulement) : nom de l'organisation, puis Player, Store, Aide, Réglages et le compte.
+@* Barre des accès rapides (ordinateur seulement) : onglets du hub à gauche, puis Urgence, Assistant, Player, Aide, Notifications, Réglages et le compte (§237).
    Remplace l'ancienne barre du haut (masquée sur ordinateur) ; le menu latéral ne garde que la navigation et le mode expert.
-   Maquette : barre-haut-raccourcis.html. *@
+   Maquettes : barre-haut-raccourcis.html, puis menu-barre-refonte.html. *@
 <header class="qbar" aria-label="Accès rapides">
-    <div class="org">@OrgName</div>
+    <nav class="hub-tabs qb-tabs" aria-label="Pages">@Tabs</nav>
     <div class="grow"></div>
     @if (ShowEmergency) { <EmergencyButton /> }
 
+    @if (AssistantShown)
+    {
+        <button type="button" class="qb-btn qb-ai @(Panel.IsOpen ? "on" : "")" data-t="Assistant (Ctrl + J)" aria-pressed="@(Panel.IsOpen ? "true" : "false")" @onclick="() => { menu = null; Panel.Toggle(); }">
+            <Ico Name="spark" Size="19" /><span>Assistant</span>@if (Panel.Busy && !Panel.IsOpen) { <i class="qb-dot" aria-label="Demande en cours"></i> }@if (AiSvc.State(AiStore.ClientId, "assistant").Status == AiStatus.NeedsPro) { <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span> }
+        </button>
+    }
     @if (ShowPlayer)
     {
         <div class="qb-wrap">
-            <button type="button" class="qb-btn @(menu == "player" ? "on" : "")" data-t="Installer le player" aria-haspopup="menu" aria-expanded="@(menu == "player" ? "true" : "false")" @onclick='() => Toggle("player")'>
-                <Ico Name="monitor-down" Size="19" /><span>Player</span>
+            <button type="button" class="qb-btn @(menu == "player" ? "on" : "")" data-t="Installer le player" aria-label="Installer le player" aria-haspopup="menu" aria-expanded="@(menu == "player" ? "true" : "false")" @onclick='() => Toggle("player")'>
+                <Ico Name="monitor-down" Size="19" />
             </button>
             @if (menu == "player")
             {
@@ -55,19 +61,6 @@
             }
         </div>
     }
-    @if (AssistantShown)
-    {
-        <button type="button" class="qb-btn qb-ai @(Panel.IsOpen ? "on" : "")" data-t="Assistant (Ctrl + J)" aria-pressed="@(Panel.IsOpen ? "true" : "false")" @onclick="() => { menu = null; Panel.Toggle(); }">
-            <Ico Name="spark" Size="19" /><span>Assistant</span>@if (Panel.Busy && !Panel.IsOpen) { <i class="qb-dot" aria-label="Demande en cours"></i> }@if (AiSvc.State(AiStore.ClientId, "assistant").Status == AiStatus.NeedsPro) { <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span> }
-        </button>
-    }
-    @if (ShowStore)
-    {
-        <button type="button" class="qb-btn store" data-t="Store d'applications" aria-haspopup="dialog" @onclick="() => { menu = null; store = true; }">
-            <Ico Name="store" Size="19" /><span>Store</span>
-        </button>
-    }
-    <span class="sep2" aria-hidden="true"></span>
     @if (ShowGettingStarted || ShowConnect)
     {
         @* Aide (§190) : on rouvre les Premiers pas ou l'assistant de l'écran à tout moment, puis le centre d'aide du site *@
@@ -106,7 +99,7 @@
     }
     <div class="qb-wrap">
         <button type="button" class="qb-me @(menu == "me" ? "on" : "")" aria-haspopup="menu" aria-expanded="@(menu == "me" ? "true" : "false")" aria-label="Compte" @onclick='() => Toggle("me")'>
-            <span class="avatar">@Initials</span><Ico Name="chevron" Size="14" />
+            <span class="avatar">@Initials</span><b>@OrgName</b><Ico Name="chevron" Size="14" />
         </button>
         @if (menu == "me")
         {
@@ -129,7 +122,6 @@
     </div>
 </header>
 
-@if (store) { <StoreDrawer OnClose="() => store = false" /> }
 
 
 @code {
@@ -140,7 +132,8 @@
     [Parameter] public string? PlanLabel { get; set; }
     [Parameter] public bool Trial { get; set; }
     [Parameter] public bool ShowPlayer { get; set; }
-    [Parameter] public bool ShowStore { get; set; }
+    /// <summary>Onglets du hub de la page, affichés à gauche de la barre.</summary>
+    [Parameter] public RenderFragment? Tabs { get; set; }
     [Parameter] public bool ShowAccount { get; set; }
     [Parameter] public bool ShowBilling { get; set; }
     [Parameter] public bool ShowOrganisation { get; set; }
@@ -170,7 +163,6 @@
     [Parameter] public RenderFragment? SettingsBadge { get; set; }
 
     private string? menu;
-    private bool store;
 
     /// <summary>Le bouton « Assistant » : IA allumée et plan Pro (sinon il invite à passer Pro) ; absent hors d'un espace client.</summary>
     private bool AssistantShown { get { try { return AiSvc.State(AiStore.ClientId, "assistant").Status != AiStatus.Off; } catch (Exception) { return false; } } }

@@ -41,4 +41,9 @@
         requestAnimationFrame(function () { pending = false; tips(); sync(); });
     }).observe(document.body, { childList: true, subtree: true });
     document.addEventListener('DOMContentLoaded', function () { tips(); sync(); });
+
+    // Barre du haut transparente : un fond et un filet apparaissent dès que la page défile (classe html.page-scrolled).
+    function scrolled() { root.classList.toggle('page-scrolled', window.scrollY > 6); }
+    window.addEventListener('scroll', scrolled, { passive: true });
+    scrolled();
 })();
