@@ -8,21 +8,59 @@
 @inject KioskLog KioskLog
 
 @* Statistiques (mode expert). Maquette validée : maquettes/statistiques.html. Plan Essential : seule la vue d'ensemble est ouverte, les autres onglets sont verrouillés. *@
+@* Page allégée (§239, maquettes/expert-pages-allegees.html) : onglets dans la barre du haut, période et filtres dans la ligne sous le titre, chiffres sans cadre. *@
+<SectionContent SectionName="qbar-tabs">
+    @foreach (var (key, label) in Tabs)
+    {
+        var k = key;
+        <button type="button" class="hub-tab @(tab == k ? "active" : "")" @onclick="() => tab = k">@label @if (k is not ("vue" or "bor") && !growth) { <Ico Name="lock" Size="12" /> }</button>
+    }
+</SectionContent>
+<div class="xp">
 <div class="page-head">
     <div>
-        <h1>Statistiques</h1>
-        <p class="sub">Ce que diffusent vos écrans, et s'ils sont bien en ligne.</p>
-    </div>
-    <div class="seg" role="group" aria-label="Période">
-        @foreach (var (key, label) in Periods)
-        {
-            var k = key;
-            <button type="button" class="@(period == k ? "on" : "")" @onclick="() => { period = k; Load(); }">@label</button>
-        }
+        <h1>@(tab == "vue" ? "Statistiques" : Tabs.FirstOrDefault(x => x.Key == tab).Label ?? "Statistiques")</h1>
+        <p class="sh-meta" role="group" aria-label="Période et filtres">
+            @{ var firstP = true; }
+            @foreach (var (key, label) in Periods)
+            {
+                var k = key;
+                if (!firstP) { <span>·</span> }
+                firstP = false;
+                <button type="button" class="sh-f @(period == k ? "on" : "mu")" @onclick="() => { period = k; Load(); }">@label</button>
+            }
+            @if (tab == "diff")
+            {
+                <span>·</span>
+                <select class="xp-sel" @bind="screenFilter" @bind:after="Load" aria-label="Écran">
+                    <option value="">Tous les écrans</option>
+                    @foreach (var s in screens) { <option value="@s.Id">@s.Name</option> }
+                </select>
+                <span class="xp-info" tabindex="0" data-t="Un passage est un contenu affiché en entier. Une veille, une coupure ou une pause réduit le temps compté."><Ico Name="info" Size="15" /></span>
+            }
+            @if (tab == "ecr" && screens.Count > 0)
+            {
+                var nOff = screens.Count(s => Status(s) == "Hors ligne"); var nPend = screens.Count(s => Helpers.HasPending(s, playlists));
+                @if (nOff > 0) { <span>·</span><button type="button" class="sh-f bad @(scrFilter == "off" ? "on" : "")" @onclick='() => scrFilter = scrFilter == "off" ? "" : "off"'>@nOff hors ligne @if (scrFilter == "off") { <Ico Name="x" Size="13" /> }</button> }
+                @if (nPend > 0) { <span>·</span><button type="button" class="sh-f pe @(scrFilter == "pend" ? "on" : "")" @onclick='() => scrFilter = scrFilter == "pend" ? "" : "pend"'>@nPend à publier @if (scrFilter == "pend") { <Ico Name="x" Size="13" /> }</button> }
+                <span class="xp-info" tabindex="0" data-t="Disponibilité sur 30 jours et historique des pannes : non encore enregistrés. Cette page montre l'état actuel."><Ico Name="info" Size="15" /></span>
+            }
+            @if (tab == "qr" && growth)
+            {
+                <span class="xp-info" tabindex="0" data-t="Taux de scan = scans ÷ passages du contenu sur la période. Le comptage ignore les robots et les doubles scans dans les 10 secondes. Aucune adresse IP n'est conservée."><Ico Name="info" Size="15" /></span>
+            }
+            @if (tab == "bor" && kiosks.Count > 0)
+            {
+                <span>·</span>
+                <select class="xp-sel" @bind="kioskFilter" @bind:after="Load" aria-label="Borne">
+                    @foreach (var k in kiosks) { <option value="@k.Id">@k.Name</option> }
+                </select>
+            }
+        </p>
     </div>
 </div>
-
-<div class="tabs" role="tablist">
+@* Petit écran et application : la barre du haut n'existe pas, les onglets restent au-dessus du contenu. *@
+<div class="tabs xp-tabs" role="tablist">
     @foreach (var (key, label) in Tabs)
     {
         var k = key;
@@ -32,7 +70,6 @@
         </button>
     }
 </div>
-
 @if (!growth && tab is not ("vue" or "bor"))
 {
     <section class="card empty">
@@ -46,7 +83,7 @@ else if (tab == "vue")
         <div class="stat"><div class="n">@allPlays.Count.ToString("N0", Fr)</div><div class="l">Passages diffusés</div></div>
         <div class="stat"><div class="n">@Human(allPlays.Sum(p => p.Seconds))</div><div class="l">Temps d'affichage</div></div>
         <div class="stat"><div class="n ok">@online<small> / @screens.Count</small></div><div class="l">Écrans en ligne</div></div>
-        <div class="stat"><div class="n @(offline > 0 ? "bad" : "")">@offline</div><div class="l">Hors ligne maintenant</div></div>
+        @if (offline > 0) { <div class="stat"><div class="n bad">@offline</div><div class="l">Hors ligne maintenant</div></div> }
     </div>
 
     <div class="st-grid">
@@ -75,15 +112,6 @@ else if (tab == "vue")
 else if (tab == "diff")
 {
     <section class="card">
-        <header>
-            <h3>Diffusion par contenu</h3>
-            <small>passages, temps d'affichage et part de la diffusion</small>
-            <span class="sp"></span>
-            <select @bind="screenFilter" @bind:after="Load" aria-label="Écran">
-                <option value="">Tous les écrans</option>
-                @foreach (var s in screens) { <option value="@s.Id">@s.Name</option> }
-            </select>
-        </header>
         @if (rows.Count == 0)
         {
             <p class="hint" style="padding:14px 18px">Aucune diffusion enregistrée sur cette période. Les écrans envoient leur historique chaque minute ; un écran hors ligne l'envoie à son retour.</p>
@@ -108,19 +136,17 @@ else if (tab == "diff")
             </table>
         }
     </section>
-    <p class="hint">Un passage est un contenu affiché en entier. Une veille, une coupure ou une pause réduit le temps compté.</p>
 }
 else if (tab == "ecr")
 {
     <section class="card">
-        <header><h3>Écrans</h3><small>état actuel</small></header>
         @if (screens.Count == 0) { <p class="hint" style="padding:14px 18px">Aucun écran connecté pour l'instant.</p> }
         else
         {
             <table class="tbl st-tbl">
                 <thead><tr><th>Écran</th><th>Aire</th><th>État</th><th>Liste de lecture</th><th class="num">Passages</th><th>Dernier contact</th><th>Publié</th></tr></thead>
                 <tbody>
-                @foreach (var s in screens)
+                @foreach (var s in screens.Where(s => scrFilter == "" || (scrFilter == "off" ? Status(s) == "Hors ligne" : Helpers.HasPending(s, playlists))))
                 {
                     var st = Status(s);
                     <tr>
@@ -137,7 +163,6 @@ else if (tab == "ecr")
             </table>
         }
     </section>
-    <p class="hint">Disponibilité sur 30 jours et historique des pannes : non encore enregistrés. Cette page montre l'état actuel.</p>
 }
 else if (tab == "qr")
 {
@@ -183,22 +208,11 @@ else if (tab == "qr")
                 }
             </section>
         </div>
-        <p class="hint">Taux de scan = scans ÷ passages du contenu sur la période. Le comptage ignore les robots et les doubles scans dans les 10 secondes. Aucune adresse IP n'est conservée.</p>
     }
 }
 else if (tab == "bor" && kiosks.Count > 0)
 {
     @* Bornes interactives : visites, touchers et tuiles ouvertes (rien de personnel). Les chiffres ne sont plus dans la fenêtre de la borne. *@
-    <section class="card">
-        <header>
-            <h3>Bornes interactives</h3>
-            <small>visites, touchers et tuiles ouvertes</small>
-            <span class="sp"></span>
-            <select @bind="kioskFilter" @bind:after="Load" aria-label="Borne">
-                @foreach (var k in kiosks) { <option value="@k.Id">@k.Name</option> }
-            </select>
-        </header>
-    </section>
     @if (kioskStats.Visits == 0 && kioskStats.Touches == 0)
     {
         <section class="card empty"><div class="big">Aucune visite sur cette période</div><p>Les statistiques apparaissent dès que la borne est touchée. Aucune donnée personnelle n'est collectée : seuls les touchers et les tuiles ouvertes sont comptés.</p></section>
@@ -277,7 +291,9 @@ else if (tab == "pub" && adsOn)
     <p class="hint">Les chiffres sont ceux de la preuve de diffusion de Linkivi : seuls les passages affichés en entier comptent, selon la part de chaque campagne. Conservation 13 mois. Les spots ne figurent ni dans vos listes de lecture ni dans votre planning.</p>
 }
 
+</div>
 @code {
+    private string scrFilter = "";   // onglet Écrans : "", "off" (hors ligne) ou "pend" (à publier)
     private static readonly (string Key, string Label)[] Periods = { ("today", "Aujourd'hui"), ("7", "7 jours"), ("30", "30 jours") };
     private static readonly (string Key, string Label)[] BaseTabs = { ("vue", "Vue d'ensemble"), ("diff", "Diffusion"), ("ecr", "Écrans"), ("qr", "Scans QR") };
     // « Publicité » : seulement si la publicité est activée dans Réglages › Publicité (licence Pro), pour garder la page épurée

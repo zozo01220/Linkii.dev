@@ -9,36 +9,62 @@
 @* Membres (24 octobre 2026, maquette membres-proprietaire-partage.html) : une ligne par personne, son rôle et ce qu'elle fait dans les trois pages.
    Tout se règle dans la fiche membre (tiroir du bas, <MemberSheet>). Les aires restent une vue à part : elles rangent les écrans, sans effet sur les droits. *@
 
+@* Page allégée (§239, maquettes/expert-pages-allegees.html) : onglets dans la barre du haut, titre + ligne dont les mots sont des filtres, loupe, menus ⋯ au survol. *@
+<SectionContent SectionName="qbar-tabs">
+    <button type="button" class="hub-tab @(view == "people" ? "active" : "")" @onclick='() => SetView("people")'>Membres</button>
+    <button type="button" class="hub-tab @(view == "areas" ? "active" : "")" @onclick='() => SetView("areas")'>Aires</button>
+</SectionContent>
+<div class="xp">
 <div class="page-head">
     <div>
-        <h1>@(view == "areas" ? "Aires de gestion" : "Membres")<span class="lx-cntpill">@(view == "areas" ? areas.Count : rows.Count)</span></h1>
-        <p class="sub sc-intro">@(view == "areas" ? "Où sont vos écrans : aires et zones." : "Qui gère quoi, en un coup d'œil. Cliquez une ligne ou une carte pour la modifier.")</p>
+        <h1>@(view == "areas" ? "Aires" : "Membres")</h1>
+        <p class="sh-meta">
+            @if (view == "areas")
+            {
+                <span>@(areas.Count == 0 ? "Aucune aire" : Pl(areas.Count, "aire", "aires"))</span>
+                @if (areas.Count > 0)
+                {
+                    <span>·</span><span>@Pl(areas.Sum(x => x.Zones.Count), "zone", "zones")</span><span>·</span><span>@Pl(screens.Count, "écran", "écrans")</span>
+                    <span class="xp-info" tabindex="0" data-t="Les aires et les zones rangent les écrans. Elles ne donnent aucun droit : on attribue des zones ou des écrans à une personne depuis sa fiche membre."><Ico Name="info" Size="15" /></span>
+                    @if (areasView == "list") { <span>·</span><button type="button" class="sh-f mu" @onclick="() => SetAllOpen(true)">Tout déplier</button><span>·</span><button type="button" class="sh-f mu" @onclick="() => SetAllOpen(false)">Tout replier</button> }
+                }
+            }
+            else
+            {
+                var nAdm = rows.Count(r => r.Admin); var nInv = rows.Count(r => r.User.IsInvited); var nOff = rows.Count(r => r.User.Disabled);
+                <span>@Pl(rows.Count, "membre", "membres")</span>
+                @if (nAdm > 0 && nAdm < rows.Count)
+                {
+                    <span>·</span>@RoleFilter("adm", Pl(nAdm, "administrateur", "administrateurs"), "")
+                    <span>·</span>@RoleFilter("usr", Pl(rows.Count - nAdm, "utilisateur", "utilisateurs"), "")
+                }
+                @if (nInv > 0) { <span>·</span>@RoleFilter("inv", nInv + " en attente", "pe") }
+                @if (nOff > 0) { <span>·</span>@RoleFilter("off", Pl(nOff, "désactivé", "désactivés"), "mu") }
+            }
+        </p>
     </div>
     <div class="row head-actions">
-        @if (view == "areas") { <button type="button" class="btn" data-fab="Nouvelle aire" @onclick="OpenNewArea"><Ico Name="plus" Size="16" /> Nouvelle aire</button> }
-        else { <button type="button" class="btn" data-fab="Nouveau membre" @onclick="() => sheet = Guid.Empty"><Ico Name="plus" Size="16" /> Nouveau membre</button> }
+        @if (view == "areas")
+        {
+            @if (areas.Count > 0) { <SimpleSearch @bind-Value="q" Placeholder="Aire ou zone" /> <ViewToggle StorageKey="areas" @bind-Value="areasView" /> }
+            <button type="button" class="btn" data-fab="Nouvelle aire" title="Nouvelle aire" @onclick="OpenNewArea"><Ico Name="plus" Size="16" /> Ajouter</button>
+        }
+        else
+        {
+            <SimpleSearch @bind-Value="q" Placeholder="Nom ou e-mail" /> <ViewToggle StorageKey="members" @bind-Value="peopleView" />
+            <button type="button" class="btn" data-fab="Nouveau membre" title="Nouveau membre" @onclick="() => sheet = Guid.Empty"><Ico Name="plus" Size="16" /> Ajouter</button>
+        }
     </div>
 </div>
-
-<div class="tabs int-tabs og-views" role="tablist" aria-label="Vue">
-    <button type="button" role="tab" class="@(view == "people" ? "on" : "")" aria-selected="@(view == "people" ? "true" : "false")" @onclick='() => { view = "people"; q = ""; }'>Membres <span class="cat-count">@rows.Count</span></button>
-    <button type="button" role="tab" class="@(view == "areas" ? "on" : "")" aria-selected="@(view == "areas" ? "true" : "false")" @onclick='() => { view = "areas"; q = ""; }'>Aires <span class="cat-count">@areas.Count</span></button>
+@* Petit écran et application : la barre du haut n'existe pas, les onglets restent au-dessus du contenu. *@
+<div class="tabs int-tabs og-views xp-tabs" role="tablist" aria-label="Vue">
+    <button type="button" role="tab" class="@(view == "people" ? "on" : "")" aria-selected="@(view == "people" ? "true" : "false")" @onclick='() => SetView("people")'>Membres <span class="cat-count">@rows.Count</span></button>
+    <button type="button" role="tab" class="@(view == "areas" ? "on" : "")" aria-selected="@(view == "areas" ? "true" : "false")" @onclick='() => SetView("areas")'>Aires <span class="cat-count">@areas.Count</span></button>
 </div>
-
 @if (view == "people")
 {
     var shown = rows.Where(r => (q.Length == 0 || r.User.Label.Contains(q, StringComparison.CurrentCultureIgnoreCase) || r.User.Email.Contains(q, StringComparison.CurrentCultureIgnoreCase))
-        && (roleFilter == "" || (roleFilter == "adm") == r.Admin)).ToList();
-    <div class="og-fb">
-        <label class="search og-search"><Ico Name="search" Size="16" /><input placeholder="Rechercher un nom ou un e-mail" aria-label="Rechercher" @bind="q" @bind:event="oninput" /></label>
-        <select class="og-role" aria-label="Rôle" @bind="roleFilter">
-            <option value="">Tous les rôles</option>
-            <option value="adm">Administrateurs</option>
-            <option value="usr">Utilisateurs</option>
-        </select>
-        <span class="grow"></span>
-        <ViewToggle StorageKey="members" @bind-Value="peopleView" />
-    </div>
+        && roleFilter switch { "adm" => r.Admin, "usr" => !r.Admin, "inv" => r.User.IsInvited, "off" => r.User.Disabled, _ => true }).ToList();
     @if (shown.Count == 0)
     {
         <div class="card og-list"><div class="og-empty">Aucune personne ne correspond.</div></div>
@@ -115,20 +141,19 @@
     }
     @if (rows.Count <= 1)
     {
-        <p class="hint">Vous êtes seul dans l'organisation : rien ne change pour vous. Ajoutez un membre pour lui confier des écrans et partager vos médias et vos listes.</p>
+        <div class="xp-empty"><b>Vous êtes seul dans l'organisation</b>Ajoutez un membre pour lui confier des écrans et partager vos médias et vos listes.
+            <button type="button" class="btn" @onclick="() => sheet = Guid.Empty"><Ico Name="plus" Size="16" /> Ajouter un membre</button></div>
     }
 }
 else
 {
     var shownAreas = areas.Where(a => q.Length == 0 || a.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || a.Zones.Any(z => z.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase))).ToList();
-    <div class="og-fb">
-        <label class="search og-search"><Ico Name="search" Size="16" /><input placeholder="Rechercher une aire ou une zone" aria-label="Rechercher" @bind="q" @bind:event="oninput" /></label>
-        <span class="ag-tot">@Pl(areas.Count, "aire", "aires")</span><span class="ag-tot">@Pl(areas.Sum(x => x.Zones.Count), "zone", "zones")</span><span class="ag-tot">@Pl(screens.Count, "écran", "écrans")</span>
-        <span class="grow"></span>
-        @if (areasView == "list") { <button type="button" class="btn ghost sm" @onclick="() => SetAllOpen(true)">Tout déplier</button> <button type="button" class="btn ghost sm" @onclick="() => SetAllOpen(false)">Tout replier</button> }
-        <ViewToggle StorageKey="areas" @bind-Value="areasView" />
-    </div>
-    @if (shownAreas.Count == 0)
+    @if (areas.Count == 0)
+    {
+        <div class="xp-empty"><b>Rangez vos écrans par lieu</b>Une aire regroupe les écrans d'un site ; ses zones les classent.
+            <button type="button" class="btn" @onclick="OpenNewArea"><Ico Name="plus" Size="16" /> Nouvelle aire</button></div>
+    }
+    else if (shownAreas.Count == 0)
     {
         <div class="card og-list"><div class="og-empty">Aucune aire ne correspond.</div></div>
     }
@@ -139,7 +164,7 @@ else
         {
             var area = a;
             var scrN = screens.Count(s => s.AreaId == area.Id);
-            <div class="card og-ac" data-nid="@area.Id">
+            <div class="card og-ac" data-nid="@area.Id" @onclick="() => OpenAreaSheet(area)">
                 <div class="og-ac-hd">
                     <span class="ag-ic"><Ico Name="map-pin" Size="18" /></span>
                     <span class="ag-tx"><b>@area.Name</b><small>@Pl(area.Zones.Count, "zone", "zones") · @(scrN == 0 ? "aucun écran" : Pl(scrN, "écran", "écrans"))</small></span>
@@ -202,9 +227,9 @@ else
             </table>
         </div>
     }
-    <p class="hint">Les aires et les zones rangent les écrans. Elles ne donnent aucun droit : on attribue des zones ou des écrans à une personne depuis sa fiche membre.</p>
 }
 
+</div>
 @if (sheet is { } sid)
 {
     <MemberSheet UserId="@(sid == Guid.Empty ? null : sid)" OnClose="() => sheet = null" OnSaved="Saved" />
@@ -329,6 +354,11 @@ else
     {
         if (row.Admin || row.Rights.Approver) { <span class="pill ap-apr" title="Approuve les publications"><Ico Name="shield" Size="12" /> Approbateur</span> }
         else if (row.Rights.SubmitApproval) { <span class="pill ap-sub" title="Ses publications doivent être approuvées">Soumis approbation</span> }
+    };
+    private void SetView(string v) { view = v; q = ""; roleFilter = ""; }
+    private RenderFragment RoleFilter(string key, string label, string cls) => __builder =>
+    {
+        <button type="button" class="sh-f @cls @(roleFilter == key ? "on" : "")" @onclick='() => roleFilter = roleFilter == key ? "" : key'>@label @if (roleFilter == key) { <Ico Name="x" Size="13" /> }</button>
     };
     private static RenderFragment ReadPill() => __builder => { <span class="pill dark"><Ico Name="eye" Size="12" /> Tout · lecture</span> };
 

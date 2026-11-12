@@ -8,34 +8,47 @@
 
 @* Historique (maquette validée : maquettes/historique.html). Trois onglets : Activité (qui a fait quoi), Écrans (hors ligne, veille et réveil attendus contre constatés, player),
    Diagnostic (erreurs et avertissements techniques). Une personne qui n'administre pas l'organisation ne voit que ses propres actions. Les lignes viennent de HistoryLog. *@
+@* Page allégée (§239, maquettes/expert-pages-allegees.html) : onglets dans la barre du haut, période dans la ligne sous le titre, loupe et export en icônes.
+   Les catégories restent en pastilles et le Diagnostic garde ses quatre compteurs (décisions de l'utilisateur). *@
+@if (admin)
+{
+    <SectionContent SectionName="qbar-tabs">
+        <button type="button" class="hub-tab @(tab == "act" ? "active" : "")" @onclick='() => SetTab("act")'>Activité</button>
+        <button type="button" class="hub-tab @(tab == "ecr" ? "active" : "")" @onclick='() => SetTab("ecr")'>Écrans</button>
+        <button type="button" class="hub-tab @(tab == "diag" ? "active" : "")" @onclick='() => SetTab("diag")'>Diagnostic @if (Count("diag", errorsOnly: true) > 0) { <span class="nbadge red">@Count("diag", errorsOnly: true)</span> }</button>
+    </SectionContent>
+}
+<div class="xp">
 <div class="page-head">
     <div>
         <h1>Historique</h1>
-        <p class="sub">@(admin ? "Ce qui s'est passé sur vos écrans et dans votre espace, et qui l'a fait." : "Vos dernières actions dans l'espace.")</p>
-    </div>
-    <div class="row head-actions">
-        <div class="seg" role="group" aria-label="Période">
+        <p class="sh-meta" role="group" aria-label="Période">
+            @{ var firstP = true; }
             @foreach (var (key, label) in Periods)
             {
                 var k = key;
-                <button type="button" class="@(period == k ? "on" : "")" @onclick="() => { period = k; shown = Page; Load(); }">@label</button>
+                if (!firstP) { <span>·</span> }
+                firstP = false;
+                <button type="button" class="sh-f @(period == k ? "on" : "mu")" @onclick="() => { period = k; shown = Page; Load(); }">@label</button>
             }
-        </div>
-        <a class="btn" download="historique-@(DateTime.Now.ToString("yyyy-MM-dd")).csv" href="@CsvHref"><Ico Name="download" Size="16" /> Exporter CSV</a>
+            <span class="xp-info" tabindex="0" data-t="Conservation : @History.KeepDays jours pour l'activité et les écrans, @History.KeepDiagDays jours pour le diagnostic. Aucun mot de passe ni jeton n'est enregistré."><Ico Name="info" Size="15" /></span>
+        </p>
+    </div>
+    <div class="row head-actions">
+        <SimpleSearch @bind-Value="query" />
+        <a class="sh-ib" download="historique-@(DateTime.Now.ToString("yyyy-MM-dd")).csv" href="@CsvHref" title="Exporter en CSV" aria-label="Exporter en CSV"><Ico Name="download" Size="18" /></a>
     </div>
 </div>
-
 @if (admin)
 {
-    <div class="tabs" role="tablist">
+    @* Petit écran et application : la barre du haut n'existe pas, les onglets restent au-dessus du contenu. *@
+    <div class="tabs xp-tabs" role="tablist">
         <button type="button" role="tab" class="@(tab == "act" ? "on" : "")" aria-selected="@(tab == "act" ? "true" : "false")" @onclick='() => SetTab("act")'>Activité <span class="hs-cnt">@Count("act")</span></button>
         <button type="button" role="tab" class="@(tab == "ecr" ? "on" : "")" aria-selected="@(tab == "ecr" ? "true" : "false")" @onclick='() => SetTab("ecr")'>Écrans <span class="hs-cnt">@Count("ecr")</span></button>
         <button type="button" role="tab" class="@(tab == "diag" ? "on" : "")" aria-selected="@(tab == "diag" ? "true" : "false")" @onclick='() => SetTab("diag")'>Diagnostic <span class="hs-cnt @(Count("diag", errorsOnly: true) > 0 ? "bad" : "")">@Count("diag")</span></button>
     </div>
 }
-
 <div class="hs-filters">
-    <label class="nt-search"><Ico Name="search" Size="15" /><input type="search" placeholder="Rechercher" aria-label="Rechercher" @bind="query" @bind:event="oninput" /></label>
     <button type="button" class="nt-chip @(cat == null ? "on" : "")" @onclick="() => { cat = null; shown = Page; }">Tout</button>
     @foreach (var (id, label) in Cats())
     {
@@ -129,7 +142,7 @@
     }
     @if (visible.Count > shown) { <button type="button" class="hs-more" @onclick="() => shown += Page">Afficher les @Math.Min(Page, visible.Count - shown) suivantes</button> }
 </div>
-<p class="hint hs-keep">Conservation : @History.KeepDays jours pour l'activité et les écrans, @History.KeepDiagDays jours pour le diagnostic. Aucun mot de passe ni jeton n'est enregistré.</p>
+</div>
 
 @if (open is { } o)
 {
