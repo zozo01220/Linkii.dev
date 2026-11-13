@@ -4020,3 +4020,9 @@ Même principe que les compositions (§231) : l'assistant propose l'action, la p
 - **Mode Expert** : inchangé.
 - Petit écran et app mobile : non touchés (entrées `nav-legacy`).
 - **Vérifié** : compilation. **Non vérifié** : rendu dans l'application, menu du compte en mode Simple.
+
+## 251. Liste de diffusion : durée d'affichage en minutes et secondes (13 novembre 2026) : demande de l'utilisateur, sans maquette.
+
+- Le menu de durée d'un contenu (`PlaylistEditor`, `.le-dp`) garde ses raccourcis (3 s à 2 min) et gagne une section « Durée personnalisée » : champs minutes et secondes + « OK ». Ils partent de la durée actuelle du contenu ; durée bornée entre 1 s et 24 h (`ApplyCustomDuration`).
+- L'interrupteur « Appliquer à tous les contenus » vaut aussi pour la durée saisie (même `SetDuration`).
+- **Vérifié** : compilation. **Non vérifié** : rendu et saisie dans le navigateur.

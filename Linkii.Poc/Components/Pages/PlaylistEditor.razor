@@ -159,7 +159,7 @@
             </div>
         </div>
 
-        @if (!readOnlyHere && !mini)
+        @if (!readOnlyHere)
         {
             @* Colonne « Ajouter » (§240) : uniquement les applications installées, celles de la page Applications. Les médias, les pages web et les compositions
                ne sont plus proposés directement : on ajoute l'application, puis on la configure. *@
@@ -531,13 +531,12 @@ else
 
     // ---------- Diffusion : état partagé par l'en-tête (« Publier sur N écrans ») et l'onglet Diffusion ----------
     private PlaylistDiffusion diff = default!;
-    private bool pubMenu, whenOpen, whenPick;   // whenPick : heure seulement choisie (pied de la fenêtre Publier) ; sinon « Programmer la diffusion… » programme aussitôt
+    private bool whenOpen, whenPick;   // whenPick : heure seulement choisie (pied de la fenêtre Publier) ; sinon « Programmer la diffusion… » programme aussitôt
     private ElementReference libRoot, libSearchInput;
 
     // null : chaque écran à son heure (maintenant si aucune) ; DateTime.MinValue : tous maintenant
     private async Task PublishNow(DateTime? all)
     {
-        pubMenu = false;
         // la relecture de l'IA a des remarques non traitées : on les montre d'abord (« Publier quand même » reste possible)
         if (Current is { } cur && revState.Available && RevPending(cur).Count > 0) { revAll = all; pubOpen = false; ShowReview(true); return; }
         if (await diff.Publish(all)) { Reload(); pubOpen = false; }
@@ -619,7 +618,7 @@ else
     // ---------- Relecture de l'IA avant publication (Pro) : dates passées, textes de modèle oubliés, fautes, textes trop petits ----------
     private AiState revState = new(AiStatus.Off, 0, 0, false);
     private AiReviewResult? rev;
-    private bool revBusy;
+
     private int revFor = -1;
     private Guid revForList;
     private CancellationTokenSource? revCts;
@@ -630,13 +629,12 @@ else
         if (Current is not { } pl) return;
         var cid = Store.ClientId;
         revState = AiSvc.State(cid, "review");
-        if (!revState.Available || pl.Draft.Count == 0) { rev = null; revBusy = false; revFor = -1; return; }
+        if (!revState.Available || pl.Draft.Count == 0) { rev = null; revFor = -1; return; }
         if (revForList == pl.Id && revFor == pl.Revision) return;
         if (revForList != pl.Id) rev = null;
         revForList = pl.Id; revFor = pl.Revision;
         revCts?.Cancel();
         var cts = revCts = new CancellationTokenSource();
-        revBusy = true;
         _ = RunReview(cid, pl.Id, cts.Token);
     }
 
@@ -651,7 +649,6 @@ else
         catch (OperationCanceledException) { }
         catch (Exception) { if (!ct.IsCancellationRequested) rev = new AiReviewResult(false, new(), ""); }
         if (ct.IsCancellationRequested) return;
-        revBusy = false;
         await InvokeAsync(() => { revState = AiSvc.State(cid, "review"); RevToast(); StateHasChanged(); RevRefresh(); });
     }
 
@@ -958,7 +955,20 @@ else
 
     private static string DurLabel(int s) => s < 60 ? $"{s} s" : s % 60 != 0 ? $"{s / 60} min {s % 60} s" : $"{s / 60} min";
 
-    private void OpenDur(PlaylistItem it) { rowMenu = null; durAll = false; durFor = durFor == it ? null : it; }
+    private int durMin, durSec;
+
+    private void OpenDur(PlaylistItem it)
+    {
+        rowMenu = null; durAll = false; durFor = durFor == it ? null : it;
+        if (durFor != null && media.FirstOrDefault(m => m.Id == it.MediaId) is { } mm)
+        {
+            var s = Helpers.ItemSeconds(it, mm, Svc.Find(mm.AppId), media);
+            durMin = s / 60; durSec = s % 60;
+        }
+    }
+
+    /// <summary>Durée saisie en minutes et secondes (au moins 1 s, au plus 24 h).</summary>
+    private void ApplyCustomDuration(PlaylistItem it) => SetDuration(it, Math.Clamp(Math.Max(0, durMin) * 60 + Math.Max(0, durSec), 1, 86400));
 
     private RenderFragment DurView(FlowRow r) =>
         @<text>
@@ -977,6 +987,12 @@ else
                                 var sec = s;
                                 <button type="button" class="@(sec == cur ? "on" : "")" @onclick="() => SetDuration(r.It, sec)">@DurLabel(sec)</button>
                             }
+                        </div>
+                        <div class="le-dph">Durée personnalisée</div>
+                        <div class="le-dpc">
+                            <input type="number" min="0" max="1439" aria-label="Minutes" @bind="durMin" @bind:event="oninput" /><span>min</span>
+                            <input type="number" min="0" max="59" aria-label="Secondes" @bind="durSec" @bind:event="oninput" /><span>s</span>
+                            <button type="button" class="btn sm" @onclick="() => ApplyCustomDuration(r.It)">OK</button>
                         </div>
                         <label class="le-sw"><input type="checkbox" @bind="durAll" /><i></i><span>Appliquer à tous les contenus</span></label>
                     </div>
@@ -1009,8 +1025,8 @@ else
         Reload();
     }
 
-    private bool listMenu, pubOpen;
-    private void OpenPublish() { listMenu = false; pubMenu = false; pubOpen = true; }
+    private bool pubOpen;
+    private void OpenPublish() { pubOpen = true; }
 
     // Fenêtre « Régler » : contenu précédent / suivant sans fermer (les modifications en cours ne sont pas enregistrées)
     private void StepSettings(int dir)
@@ -1031,7 +1047,7 @@ else
     // ---------- Bibliothèque en onglets par type (§186) ----------
     private string libTab = "app", libSearch = "";   // la colonne ne propose plus que les applications (§240)
     private int? pickAt;
-    private bool mini, presMenu;
+    private bool presMenu;
     private int onScreens;
     private List<MediaItem> webItems = new(), presItems = new();
     private static readonly string[] PresApps = { "ms-powerpoint", "google-slides", "google-docs", "pdf", "canva" };
@@ -1300,7 +1316,6 @@ else
     private void OpenSettingsOfList()
     {
         if (Current is not { } pl) return;
-        listMenu = false;
         setPortrait = Store.Read(d => PlaylistShape.IsPortrait(pl, id => d.Media.FirstOrDefault(m => m.Id == id), d.Screens));
         progDate = ""; progTime = "08:00";
         setOpen = true;
