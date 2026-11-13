@@ -1,0 +1,83 @@
+@using System.Globalization
+
+@* Aperçu du contenu « Horloge pleine page » : même rendu que le player (apps.js « clock-slide »), réglages en cours.
+   Les aiguilles tournent seules (animation CSS réglée sur l'heure du moment) ; l'heure numérique est celle de l'affichage de l'aperçu. *@
+<div class="ck-pv" style="background:@Bg;color:@Fg">
+    @if (Analog)
+    {
+        var sec = Now.TimeOfDay.TotalSeconds;
+        <div class="ck-face @(ShowDate ? "ck-withdate" : "")">
+            <svg viewBox="0 0 200 200">
+                <circle cx="100" cy="100" r="96" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".35" />
+                @for (var i = 0; i < 60; i++)
+                {
+                    var major = i % 5 == 0;
+                    <line x1="100" y1="@(major ? 8 : 10)" x2="100" y2="@(major ? 20 : 15)" stroke="currentColor" stroke-width="@(major ? "2.2" : "0.8")" opacity="@(major ? "1" : "0.5")" transform="rotate(@(i * 6) 100 100)" />
+                }
+                @if (Numbers) { @((MarkupString)NumbersSvg) }
+                <g class="ck-hand" style="animation-duration:43200s;animation-delay:-@((sec % 43200).ToString("0", CultureInfo.InvariantCulture))s"><line x1="100" y1="100" x2="100" y2="54" stroke="currentColor" stroke-width="5" stroke-linecap="round" /></g>
+                <g class="ck-hand" style="animation-duration:3600s;animation-delay:-@((sec % 3600).ToString("0", CultureInfo.InvariantCulture))s"><line x1="100" y1="100" x2="100" y2="34" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" /></g>
+                @if (Seconds)
+                {
+                    <g class="ck-hand" style="animation-duration:60s;animation-delay:-@((sec % 60).ToString("0", CultureInfo.InvariantCulture))s"><line x1="100" y1="116" x2="100" y2="26" stroke="@Accent" stroke-width="1.5" stroke-linecap="round" /></g>
+                }
+                <circle cx="100" cy="100" r="4.5" fill="@(Seconds ? Accent : "currentColor")" />
+            </svg>
+        </div>
+    }
+    else
+    {
+        <div class="ck-time @(Seconds ? "" : "ck-nosec")">@TimeText</div>
+    }
+    @if (ShowDate) { <div class="ck-date">@DateText</div> }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    /// <summary>Fuseau de l'organisation (utilisé quand le contenu n'impose pas le sien).</summary>
+    [Parameter] public string OrgZone { get; set; } = "";
+
+    private string V(string k, string d) => Values.TryGetValue(k, out var v) && !string.IsNullOrEmpty(v) ? v : d;
+    private bool On(string k, bool d) => Values.TryGetValue(k, out var v) && v is "true" or "false" ? v == "true" : d;
+    private static bool IsHex(string s) => s.Length == 7 && s[0] == '#' && s.Skip(1).All(Uri.IsHexDigit);
+
+    private bool Analog => V("style", "digital") == "analog";
+    private bool Seconds => On("showSeconds", true);
+    private bool ShowDate => On("showDate", true);
+    private bool Numbers => On("numbers", true);
+    private string Bg => IsHex(V("bg", "#000000")) ? V("bg", "#000000") : "#000000";
+    private bool Light { get { var n = Convert.ToInt32(Bg[1..], 16); return ((n >> 16) * 299 + ((n >> 8 & 255) * 587) + (n & 255) * 114) / 1000 > 150; } }
+    private string Fg => IsHex(V("color", "auto")) ? V("color", "auto") : Light ? "#0B1F3A" : "#FFFFFF";
+    private string Accent => IsHex(V("color", "auto")) ? V("color", "auto") : "#E5484D";
+
+    private string NumbersSvg => string.Concat(Enumerable.Range(1, 12).Select(i => { var a = i * Math.PI / 6; return $"<text x=\"{100 + Math.Sin(a) * 72:0.0}\" y=\"{105 - Math.Cos(a) * 72:0.0}\" text-anchor=\"middle\" font-weight=\"600\" font-size=\"14\" fill=\"currentColor\">{i}</text>".Replace(",", "."); }));
+
+    private DateTime Now
+    {
+        get
+        {
+            var id = V("timezone", OrgZone);
+            try { return string.IsNullOrEmpty(id) ? DateTime.Now : TimeZoneInfo.ConvertTime(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(id)); }
+            catch { return DateTime.Now; }
+        }
+    }
+
+    private string TimeText
+    {
+        get
+        {
+            var n = Now;
+            if (V("format", "24") == "12") return n.ToString(Seconds ? "hh:mm:ss" : "hh:mm", CultureInfo.InvariantCulture) + (n.Hour >= 12 ? " PM" : " AM");
+            return n.ToString(Seconds ? "HH:mm:ss" : "HH:mm", CultureInfo.InvariantCulture);
+        }
+    }
+
+    private string DateText
+    {
+        get
+        {
+            var s = Now.ToString("dddd d MMMM yyyy", CultureInfo.GetCultureInfo("fr-CH"));
+            return char.ToUpper(s[0]) + s[1..];
+        }
+    }
+}

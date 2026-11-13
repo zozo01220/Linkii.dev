@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Horloge pleine page et compteurs animés</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Inter:wght@300;600;800&display=swap">
+<style>
+:root{--navy:#0B1F3A;--signal:#3B82C4;--ink:#1B2433;--muted:#6B7686;--line:#DDE2E9;--bg:#F4F6F9}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "IBM Plex Sans",system-ui,sans-serif}
+header{background:#fff;border-bottom:1px solid var(--line);padding:12px 24px;display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;color:var(--navy)}
+.tabs{display:inline-flex;background:#E8EBF0;border-radius:9px;padding:3px}
+.tabs button,.seg button{border:0;background:none;padding:7px 14px;border-radius:7px;color:var(--muted);font:inherit;cursor:pointer}
+.tabs button.on,.seg button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 2px #0002}
+main{max-width:1200px;margin:22px auto;padding:0 20px}
+.lead{color:var(--muted);margin:0 0 16px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+@media(max-width:900px){.layout{grid-template-columns:1fr}}
+.stagewrap{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px}
+.stagebar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;color:var(--muted);font-size:12.5px}
+.stage{aspect-ratio:16/9;border-radius:8px;overflow:hidden;position:relative;container-type:size;transition:background .3s}
+.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
+.panel h3{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.field{margin-bottom:16px}
+.field>label{display:block;font-weight:600;font-size:13px;margin-bottom:6px}
+.seg{display:flex;background:#E8EBF0;border-radius:8px;padding:2px}
+.seg button{flex:1;padding:6px 8px;font-size:13px}
+.sw{display:flex;gap:8px;flex-wrap:wrap}
+.sw button{width:34px;height:34px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
+.sw button.on{box-shadow:0 0 0 2px var(--signal)}
+.sw .img{background:linear-gradient(135deg,#2b5876,#4e4376);}
+select,input[type=text],input[type=number]{width:100%;border:1px solid #CDD3DC;border-radius:8px;padding:7px 10px;font:inherit;background:#fff}
+input[type=range]{width:100%;accent-color:var(--signal)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.row span{font-size:13.5px}
+.tog{appearance:none;width:36px;height:20px;border-radius:99px;background:#C3CAD5;position:relative;cursor:pointer;transition:.2s;flex:none}
+.tog::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s}
+.tog:checked{background:var(--signal)}.tog:checked::after{left:18px}
+.btn{border:1px solid #CDD3DC;background:#fff;border-radius:8px;padding:7px 14px;font:inherit;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.btn.pri{background:var(--navy);border-color:var(--navy);color:#fff}
+.hint{font-size:12.5px;color:var(--muted);margin-top:4px}
+.badge{display:inline-block;background:#E8F1FA;color:#1F5D99;border-radius:99px;padding:1px 9px;font-size:12px;font-weight:600}
+.notes{margin-top:22px;background:#fff;border:1px dashed #CDD3DC;border-radius:12px;padding:16px 20px}
+.notes h3{margin:0 0 8px;font-size:14px}.notes ul{margin:0;padding-left:20px}.notes li{margin:3px 0}
+.hidden{display:none!important}
+
+/* ---------- Horloge ---------- */
+.clk{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--fg,#fff)}
+.digital .time{font:800 19cqw/1 "Inter",sans-serif;letter-spacing:-.02em;font-variant-numeric:tabular-nums;display:flex;align-items:baseline}
+.digital .time small{font-size:9cqw;font-weight:300;opacity:.6;margin-left:1.5cqw}
+.digital .colon{animation:blink 1s steps(2) infinite;margin:0 .5cqw;position:relative;top:-1.5cqw}
+@keyframes blink{50%{opacity:.25}}
+.clk .date{font:300 4.2cqw/1.2 "Inter",sans-serif;opacity:.75;margin-top:2.5cqw;text-transform:capitalize}
+.clk .tz{font:600 1.8cqw "Inter",sans-serif;letter-spacing:.3em;opacity:.45;margin-top:1.5cqw;text-transform:uppercase}
+.analog svg{height:86cqh;width:auto}
+.analog .date{position:absolute;bottom:3cqh;margin:0;font-size:3.4cqw}
+.analog.withdate svg{height:76cqh;margin-top:-4cqh}
+
+/* ---------- Compteurs / composition ---------- */
+.compo{position:absolute;inset:0;background:linear-gradient(135deg,#0B1F3A,#17406E);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:4cqw;text-align:center}
+.compo h2{font:600 4cqw "Inter",sans-serif;margin:0 0 5cqh;opacity:.9;letter-spacing:.01em}
+.counters{display:flex;gap:6cqw;width:100%;justify-content:center}
+.ctr{flex:1;max-width:28cqw}
+.ctr .n{font:800 9.5cqw/1 "Inter",sans-serif;font-variant-numeric:tabular-nums;color:var(--cc,#fff)}
+.ctr .l{font:300 2.8cqw "Inter",sans-serif;margin-top:1.5cqh;opacity:.8}
+.ctr .bar{height:.5cqh;background:var(--cc,#3B82C4);border-radius:9px;margin:2.5cqh auto 0;width:6cqw;opacity:.9}
+.sel{outline:2px solid var(--signal);outline-offset:6px;border-radius:6px;cursor:pointer}
+.ctr{cursor:pointer;padding:1cqh 0}
+.ctr:hover{outline:1px dashed #ffffff66;outline-offset:6px;border-radius:6px}
+.ctr.sel{outline:2px solid #6DB1E8}
+.list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.list button{display:flex;justify-content:space-between;border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 10px;font:inherit;cursor:pointer;text-align:left}
+.list button.on{border-color:var(--signal);background:#F2F7FC}
+.list b{font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<header>
+  <h1>Maquette · Horloge pleine page et compteurs animés</h1>
+  <div class="tabs" id="tabs"><button class="on" data-t="clock">1 · Horloge pleine page</button><button data-t="count">2 · Compteurs animés</button></div>
+</header>
+
+<main>
+<!-- ================= 1. HORLOGE ================= -->
+<section id="clock">
+  <p class="lead">L'horloge devient aussi une <b>application de liste de lecture</b> : une page entière, en numérique ou à aiguilles, <b>fond noir par défaut</b> mais modifiable. Elle s'ajoute comme n'importe quel contenu, avec sa durée d'affichage.</p>
+  <div class="layout">
+    <div class="stagewrap">
+      <div class="stagebar"><span>Aperçu 16:9 · en direct</span><span class="badge" id="clkTitle">Horloge numérique</span></div>
+      <div class="stage" id="clkStage"></div>
+    </div>
+    <div class="panel">
+      <h3>Configurer l'horloge</h3>
+      <div class="field"><label>Style</label>
+        <div class="seg" id="cStyle"><button class="on" data-v="digital">Numérique</button><button data-v="analog">À aiguilles</button></div></div>
+      <div class="field"><label>Fond</label>
+        <div class="sw" id="cBg">
+          <button class="on" data-v="#000000" style="background:#000" title="Noir (défaut)"></button>
+          <button data-v="#1C1F26" style="background:#1C1F26" title="Anthracite"></button>
+          <button data-v="#0B1F3A" style="background:#0B1F3A" title="Bleu nuit Linkivi"></button>
+          <button data-v="#FFFFFF" style="background:#fff" title="Blanc"></button>
+          <button data-v="#F3E9D7" style="background:#F3E9D7" title="Crème"></button>
+          <button data-v="img" class="img" title="Image de la médiathèque"></button>
+        </div>
+        <div class="hint" id="bgHint">Noir · par défaut. Le texte s'adapte automatiquement.</div></div>
+      <div class="field"><label>Couleur de l'heure</label>
+        <div class="sw" id="cFg">
+          <button class="on" data-v="auto" style="background:linear-gradient(90deg,#000 50%,#fff 50%)" title="Automatique"></button>
+          <button data-v="#3B82C4" style="background:#3B82C4"></button>
+          <button data-v="#4ADE80" style="background:#4ADE80"></button>
+          <button data-v="#FBBF24" style="background:#FBBF24"></button>
+          <button data-v="#F87171" style="background:#F87171"></button>
+        </div></div>
+      <div class="row"><span>Afficher les secondes</span><input class="tog" type="checkbox" id="cSec" checked></div>
+      <div class="row"><span>Afficher la date</span><input class="tog" type="checkbox" id="cDate" checked></div>
+      <div class="row" id="rowH24"><span>Format 24 h</span><input class="tog" type="checkbox" id="c24" checked></div>
+      <div class="row hidden" id="rowNum"><span>Chiffres sur le cadran</span><input class="tog" type="checkbox" id="cNum" checked></div>
+      <div class="field"><label>Fuseau horaire</label>
+        <select id="cTz"><option value="">Celui de l'écran</option><option>Europe/Zurich</option><option>Europe/London</option><option>America/New_York</option><option>Asia/Tokyo</option></select></div>
+      <div class="hint">Mode Simple : seulement Style et Fond. Le reste est dans « Options avancées ».</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 2. COMPTEURS ================= -->
+<section id="count" class="hidden">
+  <p class="lead">Dans l'éditeur de compositions, un nouvel outil <b>Compteur animé</b> (menu Indicateurs) : le chiffre part de 0 et monte jusqu'à la valeur en 1 à 2 secondes, dès que la page apparaît à l'écran.</p>
+  <div class="layout">
+    <div class="stagewrap">
+      <div class="stagebar"><span>Composition · cliquez un compteur pour le modifier</span><button class="btn" id="replay">↻ Rejouer l'animation</button></div>
+      <div class="stage" id="cStage"></div>
+    </div>
+    <div class="panel">
+      <h3>Compteurs de la page</h3>
+      <div class="list" id="cList"></div>
+      <button class="btn" id="addCtr" style="width:100%;justify-content:center;margin-bottom:16px">+ Ajouter un compteur</button>
+      <h3>Compteur sélectionné</h3>
+      <div class="field"><label>Valeur finale</label><input type="number" id="kVal" min="0"></div>
+      <div class="field"><label>Texte sous le chiffre</label><input type="text" id="kLab"></div>
+      <div class="row" style="gap:8px">
+        <div style="flex:1"><label style="font-weight:600;font-size:13px">Avant</label><input type="text" id="kPre" placeholder="ex. CHF"></div>
+        <div style="flex:1"><label style="font-weight:600;font-size:13px">Après</label><input type="text" id="kSuf" placeholder="ex. +, %"></div>
+      </div>
+      <div class="field"><label>Durée de l'animation : <span id="kDurT">1,5 s</span></label>
+        <input type="range" id="kDur" min="1" max="2" step="0.1" value="1.5"><div class="hint">Entre 1 et 2 secondes. Le compteur part toujours de 0.</div></div>
+      <div class="field"><label>Séparateur des milliers</label>
+        <div class="seg" id="kSep"><button class="on" data-v="'">1'000</button><button data-v=" ">1 000</button><button data-v=",">1,000</button><button data-v="">1000</button></div></div>
+      <div class="field"><label>Couleur du chiffre</label>
+        <div class="sw" id="kCol">
+          <button class="on" data-v="#FFFFFF" style="background:#fff"></button>
+          <button data-v="#6DB1E8" style="background:#6DB1E8"></button>
+          <button data-v="#4ADE80" style="background:#4ADE80"></button>
+          <button data-v="#FBBF24" style="background:#FBBF24"></button>
+        </div></div>
+      <div class="field"><label>Quand l'animer ?</label>
+        <select id="kWhen"><option value="show">À chaque affichage de la page</option><option value="loop">En boucle (toutes les 8 s)</option><option value="once">Une seule fois</option></select></div>
+      <div class="hint">Option avancée : reliable à une source de données (ex. nombre d'écrans réel) au lieu d'un chiffre saisi.</div>
+    </div>
+  </div>
+</section>
+
+<div class="notes">
+  <h3>Points à valider avant de coder</h3>
+  <ul>
+    <li><b>Horloge</b> : nouvelle application « Horloge » dans la liste de lecture (pleine page), en plus du widget actuel posé sur un écran. Fond noir par défaut ; fond image possible depuis la médiathèque.</li>
+    <li><b>Compteurs</b> : nouveau type dans les Indicateurs de l'éditeur de compositions, plusieurs par page, durée 1 à 2 s (défaut 1,5 s), décélération douce à l'arrivée.</li>
+    <li>Séparateur des milliers à l'apostrophe par défaut (1'000), selon le format des nombres déjà prévu (§142).</li>
+    <li>Question ouverte : les compteurs doivent-ils pouvoir se brancher sur les vrais chiffres (écrans, clients) ? Proposé en avancé.</li>
+  </ul>
+</div>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+// onglets
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#clock').classList.toggle('hidden',b.dataset.t!=='clock');
+  $('#count').classList.toggle('hidden',b.dataset.t!=='count');
+  if(b.dataset.t==='count') playAll();
+});
+function seg(id,cb){const el=$(id);el.querySelectorAll('button').forEach(b=>b.onclick=()=>{el.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));cb(b.dataset.v)})}
+
+/* ---------- Horloge ---------- */
+const C={style:'digital',bg:'#000000',fg:'auto',sec:true,date:true,h24:true,num:true,tz:''};
+const isLight=c=>{if(c==='img')return false;const n=parseInt(c.slice(1),16);return ((n>>16)*299+((n>>8)&255)*587+(n&255)*114)/1000>150};
+function parts(){
+  const o={timeZone:C.tz||undefined};
+  const d=new Date();
+  const f=(opt)=>new Intl.DateTimeFormat('fr-CH',{...o,...opt}).format(d);
+  const [h,m,s]=new Intl.DateTimeFormat('en-GB',{...o,hour:'numeric',minute:'numeric',second:'numeric',hour12:false}).format(d).split(':').map(Number);
+  return {h,m,s,date:f({weekday:'long',day:'numeric',month:'long',year:'numeric'}),ms:d.getMilliseconds()};
+}
+function buildAnalog(){
+  let t='';
+  for(let i=0;i<60;i++){const a=i*6,major=i%5===0;t+=`<line x1="100" y1="${major?8:10}" x2="100" y2="${major?20:15}" stroke="currentColor" stroke-width="${major?2.2:.8}" opacity="${major?1:.5}" transform="rotate(${a} 100 100)"/>`}
+  let n='';if(C.num)for(let i=1;i<=12;i++){const a=i*30*Math.PI/180;n+=`<text x="${100+Math.sin(a)*72}" y="${100-Math.cos(a)*72+5}" text-anchor="middle" font-family="Inter" font-weight="600" font-size="14" fill="currentColor">${i}</text>`}
+  const acc=C.fg==='auto'?'#E5484D':C.fg;
+  return `<svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="96" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".35"/>${t}${n}
+  <line id="hh" x1="100" y1="100" x2="100" y2="54" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+  <line id="mh" x1="100" y1="100" x2="100" y2="34" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
+  ${C.sec?`<line id="sh" x1="100" y1="116" x2="100" y2="26" stroke="${acc}" stroke-width="1.5" stroke-linecap="round"/>`:''}
+  <circle cx="100" cy="100" r="4.5" fill="${C.sec?acc:'currentColor'}"/></svg>`;
+}
+function renderClock(){
+  const st=$('#clkStage');
+  const light=isLight(C.bg);
+  const fg=C.fg==='auto'?(light?'#0B1F3A':'#FFFFFF'):C.fg;
+  st.style.background=C.bg==='img'?'linear-gradient(135deg,#2b5876,#4e4376)':C.bg;
+  st.style.setProperty('--fg',fg);
+  $('#clkTitle').textContent=C.style==='digital'?'Horloge numérique':'Horloge à aiguilles';
+  $('#rowH24').classList.toggle('hidden',C.style!=='digital');
+  $('#rowNum').classList.toggle('hidden',C.style!=='analog');
+  $('#bgHint').textContent=C.bg==='#000000'?'Noir · par défaut. Le texte s\'adapte automatiquement.':C.bg==='img'?'Image de la médiathèque (choix à l\'étape suivante).':'Fond personnalisé. Le texte s\'adapte automatiquement.';
+  if(C.style==='digital') st.innerHTML=`<div class="clk digital"><div class="time" id="tm"></div><div class="date" id="dt"></div><div class="tz" id="tzl"></div></div>`;
+  else st.innerHTML=`<div class="clk analog ${C.date?'withdate':''}">${buildAnalog()}<div class="date" id="dt"></div></div>`;
+  tick();
+}
+function tick(){
+  const p=parts();
+  const dt=$('#dt'); if(dt) dt.textContent=C.date?p.date:'';
+  if(C.style==='digital'){
+    let h=p.h,suf='';if(!C.h24){suf=h>=12?'PM':'AM';h=h%12||12}
+    const z=n=>String(n).padStart(2,'0');
+    $('#tm').innerHTML=`${z(h)}<span class="colon">:</span>${z(p.m)}${C.sec?`<span class="colon">:</span>${z(p.s)}`:''}${suf?`<small>${suf}</small>`:''}`;
+    $('#tzl').textContent=C.tz?C.tz.replace('_',' '):'';
+  }else{
+    const s=p.s+p.ms/1000,m=p.m+s/60,h=(p.h%12)+m/60;
+    $('#hh').setAttribute('transform',`rotate(${h*30} 100 100)`);
+    $('#mh').setAttribute('transform',`rotate(${m*6} 100 100)`);
+    const sh=$('#sh'); if(sh) sh.setAttribute('transform',`rotate(${s*6} 100 100)`);
+  }
+}
+seg('#cStyle',v=>{C.style=v;renderClock()});
+seg('#cBg',v=>{C.bg=v;renderClock()});
+seg('#cFg',v=>{C.fg=v;renderClock()});
+$('#cSec').onchange=e=>{C.sec=e.target.checked;renderClock()};
+$('#cDate').onchange=e=>{C.date=e.target.checked;renderClock()};
+$('#c24').onchange=e=>{C.h24=e.target.checked;renderClock()};
+$('#cNum').onchange=e=>{C.num=e.target.checked;renderClock()};
+$('#cTz').onchange=e=>{C.tz=e.target.value;renderClock()};
+renderClock();
+(function loop(){tick();requestAnimationFrame(loop)})();
+
+/* ---------- Compteurs ---------- */
+const K=[
+ {v:1000,lab:'écrans',pre:'',suf:'',dur:1.5,sep:"'",col:'#FFFFFF',when:'show'},
+ {v:590,lab:'clients',pre:'',suf:'',dur:1.5,sep:"'",col:'#6DB1E8',when:'show'},
+ {v:22,lab:'pays',pre:'',suf:'',dur:1.5,sep:"'",col:'#4ADE80',when:'show'}];
+let sel=0,timers=[],loopT=null;
+const fmt=(n,k)=>{let s=String(Math.round(n));if(k.sep)s=s.replace(/\B(?=(\d{3})+(?!\d))/g,k.sep);return k.pre+s+k.suf};
+function drawCompo(){
+  $('#cStage').innerHTML=`<div class="compo"><h2>Linkivi en quelques chiffres</h2><div class="counters">${K.map((k,i)=>`<div class="ctr ${i===sel?'sel':''}" data-i="${i}" style="--cc:${k.col}"><div class="n">${fmt(0,k)}</div><div class="l">${k.lab}</div><div class="bar"></div></div>`).join('')}</div></div>`;
+  document.querySelectorAll('.ctr').forEach(el=>el.onclick=()=>{sel=+el.dataset.i;syncPanel();document.querySelectorAll('.ctr').forEach(x=>x.classList.toggle('sel',x===el));renderList()});
+}
+function playAll(){
+  timers.forEach(cancelAnimationFrame);timers=[];clearInterval(loopT);
+  const ease=t=>1-Math.pow(1-t,3);
+  K.forEach((k,i)=>{
+    const el=document.querySelector(`.ctr[data-i="${i}"] .n`);if(!el)return;
+    const t0=performance.now();
+    (function f(now){const t=Math.min(1,(now-t0)/(k.dur*1000));el.textContent=fmt(k.v*ease(t),k);if(t<1)timers[i]=requestAnimationFrame(f)})(t0);
+  });
+  if(K.some(k=>k.when==='loop'))loopT=setInterval(playAll,8000);
+}
+function renderList(){
+  $('#cList').innerHTML=K.map((k,i)=>`<button class="${i===sel?'on':''}" data-i="${i}"><span>${k.lab||'(sans texte)'}</span><b>${fmt(k.v,k)}</b></button>`).join('');
+  document.querySelectorAll('#cList button').forEach(b=>b.onclick=()=>{sel=+b.dataset.i;syncPanel();drawCompo();playAll();renderList()});
+}
+function syncPanel(){
+  const k=K[sel];
+  $('#kVal').value=k.v;$('#kLab').value=k.lab;$('#kPre').value=k.pre;$('#kSuf').value=k.suf;
+  $('#kDur').value=k.dur;$('#kDurT').textContent=String(k.dur).replace('.',',')+' s';$('#kWhen').value=k.when;
+  document.querySelectorAll('#kSep button').forEach(b=>b.classList.toggle('on',b.dataset.v===k.sep));
+  document.querySelectorAll('#kCol button').forEach(b=>b.classList.toggle('on',b.dataset.v===k.col));
+}
+function upd(fn,replay=true){fn(K[sel]);drawCompo();if(replay)playAll();else document.querySelectorAll('.ctr .n').forEach((el,i)=>el.textContent=fmt(K[i].v,K[i]));renderList()}
+$('#kVal').oninput=e=>upd(k=>k.v=Math.max(0,+e.target.value||0));
+$('#kLab').oninput=e=>upd(k=>k.lab=e.target.value,false);
+$('#kPre').oninput=e=>upd(k=>k.pre=e.target.value,false);
+$('#kSuf').oninput=e=>upd(k=>k.suf=e.target.value,false);
+$('#kDur').oninput=e=>{$('#kDurT').textContent=(+e.target.value).toFixed(1).replace('.',',')+' s';upd(k=>k.dur=+e.target.value)};
+$('#kWhen').onchange=e=>upd(k=>k.when=e.target.value,false);
+seg('#kSep',v=>upd(k=>k.sep=v,false));
+seg('#kCol',v=>upd(k=>k.col=v,false));
+$('#replay').onclick=playAll;
+$('#addCtr').onclick=()=>{if(K.length>=4)return;K.push({v:100,lab:'nouveau',pre:'',suf:'',dur:1.5,sep:"'",col:'#FFFFFF',when:'show'});sel=K.length-1;syncPanel();drawCompo();playAll();renderList()};
+drawCompo();syncPanel();renderList();
+</script>
+</body>
+</html>

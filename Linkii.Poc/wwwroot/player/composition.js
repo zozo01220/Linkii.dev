@@ -53,7 +53,7 @@
   function font(v) { return FONTS.indexOf(v) !== -1 ? v : FONTS[0]; }
   function weight(v) { var n = Math.round(num(v, 400, 100, 900) / 100) * 100; return n; }
   function align(v) { return v === 'center' || v === 'right' ? v : 'left'; }
-  function textual(e) { return e.type === 'text' || (e.type === 'widget' && (e.kind === 'clock' || e.kind === 'date' || e.kind === 'countdown')); }
+  function textual(e) { return e.type === 'text' || (e.type === 'widget' && (e.kind === 'clock' || e.kind === 'date' || e.kind === 'countdown' || e.kind === 'counter')); }
 
   function txs(e) {
     return 'font-family:\'' + font(e.font) + '\',sans-serif;font-size:' + num(e.size, 40, 4, 2000) + 'px;font-weight:' + weight(e.weight) +
@@ -72,6 +72,17 @@
     try { s = new Date().toLocaleDateString('fr-CH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: tz || undefined }); }
     catch (x) { s = new Date().toLocaleDateString(); }
     return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  /** Compteur animé : le nombre avec séparateur des milliers (apostrophe par défaut), préfixe et suffixe. */
+  function countText(e, n) {
+    var t = String(Math.max(0, Math.round(n))), sep = e.sep === undefined || e.sep === null ? "'" : String(e.sep).slice(0, 1);
+    if (sep) t = t.replace(/\B(?=(\d{3})+(?!\d))/g, sep);
+    return String(e.pre || '').slice(0, 12) + t + String(e.suf || '').slice(0, 12);
+  }
+  function counterHtml(e) {   // valeur finale d'emblée (vignettes, éditeur) ; le player la fait partir de 0 (C.counters)
+    var v = num(e.val, 0, 0, 1e12), lab = String(e.lab || '').slice(0, 80), sep = e.sep === undefined ? "'" : String(e.sep).slice(0, 1);
+    return '<div class="lc-tx lc-ctr" style="' + txs(e) + '" data-live="counter" data-val="' + v + '" data-dur="' + num(e.dur, 1.5, 1, 2) + '" data-pre="' + esc(String(e.pre || '').slice(0, 12)) + '" data-suf="' + esc(String(e.suf || '').slice(0, 12)) +
+      '" data-sep="' + esc(sep) + '"><span class="n">' + esc(countText(e, v)) + '</span>' + (lab ? '<small style="display:block;font-size:.3em;font-weight:300;opacity:.8;line-height:1.3;margin-top:.15em">' + esc(lab) + '</small>' : '') + '</div>';
   }
   function daysTo(until) {
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(until || '');
@@ -931,6 +942,7 @@
     if (t === 'widget') {
       if (e.kind === 'clock') return '<div class="lc-tx" style="' + txs(e) + '" data-live="clock" data-sec="' + (e.sec ? 1 : 0) + '">' + timeText(e.sec, o.tz) + '</div>';
       if (e.kind === 'date') return '<div class="lc-tx" style="' + txs(e) + '" data-live="date">' + esc(dateText(o.tz)) + '</div>';
+      if (e.kind === 'counter') return counterHtml(e);
       if (e.kind === 'countdown') return '<div class="lc-tx" style="' + txs(e) + '" data-live="countdown" data-until="' + esc(e.until) + '">J-' + daysTo(e.until) + '</div>';
       if (e.kind === 'ticker') {
         var tx = esc(e.text);
@@ -1107,6 +1119,25 @@
         loader(v.getAttribute('data-vsrc'), function (src) { v.src = src; var pr = v.play(); if (pr && pr.catch) pr.catch(function () {}); });
       })(list[i]);
     },
+    /** Compteurs animés : chaque chiffre part de 0 et monte jusqu'à sa valeur en 1 à 2 s (décélération douce). only : un seul compteur (bouton « Rejouer » de l'éditeur). */
+    counters: function (root, only) {
+      var list = only ? [only] : root.querySelectorAll('[data-live="counter"]');
+      for (var i = 0; i < list.length; i++) (function (n) {
+        var sp = n.querySelector('.n'), v = +n.getAttribute('data-val') || 0, d = Math.min(2, Math.max(1, +n.getAttribute('data-dur') || 1.5)) * 1000;
+        if (!sp || !w.requestAnimationFrame) return;
+        var e = { pre: n.getAttribute('data-pre'), suf: n.getAttribute('data-suf'), sep: n.getAttribute('data-sep') };
+        if (n._raf) w.cancelAnimationFrame(n._raf);
+        var t0 = null;
+        sp.textContent = countText(e, 0);
+        n._raf = w.requestAnimationFrame(function step(ts) {
+          if (!n.isConnected) return;
+          if (t0 === null) t0 = ts;
+          var t = Math.min(1, (ts - t0) / d);
+          sp.textContent = countText(e, v * (1 - Math.pow(1 - t, 3)));
+          n._raf = t < 1 ? w.requestAnimationFrame(step) : 0;
+        });
+      })(list[i]);
+    },
     /** Met à jour horloges, dates et comptes à rebours. */
     tick: function (root, tz) {
       var ifs = root.querySelectorAll('[data-if]'), now0 = ifs.length ? nowIn(tz) : null;
@@ -1132,6 +1163,7 @@
           for (var c = n.firstChild; c; c = c.nextSibling) { var on = +c.getAttribute('data-pg') === cur; if ((c.style.display !== 'none') !== on) c.style.display = on ? '' : 'none'; }
           continue;
         }
+        if (k === 'counter') continue;   // animé une fois par C.counters, jamais réécrit
         v = k === 'clock' ? timeText(n.getAttribute('data-sec') === '1', tz) : k === 'date' ? dateText(tz) : 'J-' + daysTo(n.getAttribute('data-until'));
         if (n.textContent !== v) n.textContent = v;
       }
@@ -1197,6 +1229,7 @@
     h.onStop(function () { for (var i = 0; i < srcs.length; i++) srcs[i].revoke(); });
     C.images(st, function (url, cb) { h.media(url).then(function (m) { srcs.push(m); cb(m.src); }); });
     C.videos(st, function (url, cb) { h.media(url).then(function (m) { srcs.push(m); cb(m.src); }); });
+    C.counters(st);
     // La scène fait la taille de la page (ex. 2160 × 3840) : tant qu'elle n'est pas mise à l'échelle elle déborde de l'écran. Elle reste donc
     // cachée jusqu'au premier calcul réussi, et l'échelle suit la taille de la zone (ResizeObserver) : l'élément n'a pas encore de taille à l'insertion.
     st.style.visibility = 'hidden';

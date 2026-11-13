@@ -7,7 +7,7 @@
 (function (w) {
   'use strict';
   const WEIGHTS = [[300, 'Léger'], [400, 'Normal'], [500, 'Moyen'], [600, 'Demi-gras'], [700, 'Gras'], [800, 'Extra-gras'], [900, 'Noir']];
-  const WNAMES = { clock: 'Horloge', date: 'Date', ticker: 'Bandeau défilant', countdown: 'Compte à rebours' };
+  const WNAMES = { clock: 'Horloge', date: 'Date', ticker: 'Bandeau défilant', countdown: 'Compte à rebours', counter: 'Compteur animé' };
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   // pastille d'une source : vrai logo si elle en a un (rss, Home Assistant, météo), sinon le pictogramme sur sa couleur
   const wi = m => m.logo ? `<span class="wi is-brand"><svg width="100%" height="100%"><use href="/brand-logos.svg#${m.logo}" width="100%" height="100%"/></svg></span>` : `<span class="wi" style="background:${m.color}">${m.icon}</span>`;
@@ -43,7 +43,8 @@
   const Q = o => Object.assign({ id: nid(), type: 'qr', x: 0, y: 0, w: 220, h: 220, fg: '#000000', bg: '#ffffff', url: 'https://www.exemple.ch', opacity: 1 }, o);
   const W = (kind, o) => Object.assign({ id: nid(), type: 'widget', kind, x: 0, y: 0, w: 420, h: 90, font: 'IBM Plex Sans', size: 56, weight: 500, color: '#0B1F3A', align: 'left', ls: 0, lh: 1.1, italic: false, opacity: 1 },
     kind === 'ticker' ? { w: 1920, h: 100, size: 44, bg: '#0B1F3A', color: '#ffffff', speed: 18, text: 'Votre message défile ici · Ajoutez autant d\'informations que nécessaire' } : {},
-    kind === 'countdown' ? { until: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10), w: 320 } : {}, o);
+    kind === 'countdown' ? { until: new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10), w: 320 } : {},
+    kind === 'counter' ? { val: 1000, lab: 'écrans', pre: '', suf: '', sep: "'", dur: 1.5, w: 420, h: 190, size: 120, weight: 800, align: 'center' } : {}, o);
 
   // ---------- modèles (sans photo : les emplacements d'image se remplissent depuis la médiathèque) ----------
   const TPL = [
@@ -1783,6 +1784,11 @@
       if (e.type === 'text' && aiOn !== 'off') h += `<button class="ce-tb ce-ai" data-act="ai" title="Corriger et resserrer ce texte avec l'IA">✦ Améliorer${aiOn === 'pro' ? ' <span class="plan-tag pro">Pro</span>' : ''}</button>`;
       if (e.kind === 'clock') h += sepH + `<button class="ce-tb ${e.sec ? 'on' : ''}" data-tog="sec">Secondes</button>`;
       if (e.kind === 'countdown') h += sepH + `<label class="ce-lbl">Jusqu'au<input type="date" data-k="until" value="${esc(e.until)}"></label>`;
+      if (e.kind === 'counter') h += sepH + `<label class="ce-lbl" title="Valeur atteinte à la fin de l'animation">Valeur<input type="number" data-k="val" data-t="n" min="0" step="1" value="${+e.val || 0}" style="width:96px"></label>` +
+        `<label class="ce-lbl">Texte<input type="text" data-k="lab" value="${esc(e.lab)}" style="width:110px" maxlength="80" placeholder="écrans"></label>` +
+        `<label class="ce-lbl" title="Avant le chiffre (CHF, ~…)">Avant<input type="text" data-k="pre" value="${esc(e.pre)}" style="width:52px" maxlength="12"></label><label class="ce-lbl" title="Après le chiffre (+, %, k…)">Après<input type="text" data-k="suf" value="${esc(e.suf)}" style="width:52px" maxlength="12"></label>` +
+        pick('sep', [["'", "1'000"], [' ', '1 000'], [',', '1,000'], ['', '1000']], e.sep === undefined ? "'" : e.sep, 'Séparateur des milliers') +
+        pick('dur', [[1, '1 s'], [1.5, '1,5 s'], [2, '2 s']], e.dur || 1.5, 'Durée de l\'animation') + `<button class="ce-tb" data-act="replay" title="Rejouer l'animation">↻ Rejouer</button>`;
     }
     else if (e.type === 'image') h = `<button class="ce-tb" data-act="replace">⇄ ${e.media ? 'Remplacer' : 'Choisir une image'}</button>` + pick('fit', [['cover', 'Remplir'], ['contain', 'Image entière']], e.fit, 'Cadrage') +
       range('radius', 'Arrondi', 0, 300, 2, e.radius) + range('opacity', 'Opacité', 0, 1, .05, e.opacity);
@@ -1849,6 +1855,7 @@
     else if (a === 'iconchange') { iconMode = 'replace'; openPanel('formes'); }
     else if (a === 'dup') dup();
     else if (a === 'del') del();
+    else if (a === 'replay') { const n = q('#ce-stage') && q('#ce-stage').querySelector(`[data-id="${e.id}"] [data-live="counter"]`); LC().counters(null, n || undefined); }
     else if (a === 'replace') { mediaMode = 'replace'; if (e.type === 'video') mediaTab = 'vid'; openPanel('medias'); }
     else if (a === 'field') fieldMenu(b);
     else if (a === 'ai') aiAsk(b, 'improve');
@@ -2051,7 +2058,8 @@
     if (panelName === 'widgets') {
       const SM = LC().SRC;
       const L = [['clock', '#0B1F3A', '◷', 'Horloge', 'Heure en direct, avec ou sans secondes'], ['date', '#0B1F3A', '▦', 'Date', 'Date du jour, mise à jour à minuit'],
-        ['ticker', '#4F6BED', '⇢', 'Bandeau défilant', 'Texte qui défile en continu'], ['countdown', '#E8590C', '⏳', 'Compte à rebours', "Jours restants jusqu'à une date"]];
+        ['ticker', '#4F6BED', '⇢', 'Bandeau défilant', 'Texte qui défile en continu'], ['countdown', '#E8590C', '⏳', 'Compte à rebours', "Jours restants jusqu'à une date"],
+        ['counter', '#1F8A70', '123', 'Compteur animé', 'Un chiffre libre qui monte de 0 à sa valeur en 1 à 2 s']];
       h = '<div class="ce-grp" style="margin-top:0">Widgets</div>' + L.map(([key, c, i, n, d]) => `<button class="ce-wrow" draggable="true" data-add="w:${key}"><span class="wi" style="background:${c}">${i}</span><span><b>${n}</b><small>${d}</small></span></button>`).join('') +
         `<button class="ce-wrow" draggable="true" data-add="qr:"><span class="wi" style="background:#5A6B80">▣</span><span><b>QR code</b><small>Lien au choix. Pour compter les scans : onglet « QR code » du contenu, dans la liste de lecture</small></span></button>
         <div class="ce-grp">Mes applications <small>déjà configurées</small></div>
@@ -2529,7 +2537,7 @@
     if (e.type === 'app') return (LC().SRC[e.app] || {}).icon || '◇';
     if (e.type === 'list') return '▦';
     if (e.type === 'chart') return '▥';
-    return e.type === 'text' ? 'T' : e.type === 'image' ? '▨' : e.type === 'video' ? '▶' : e.type === 'icon' ? '◇' : e.type === 'room' ? '▭' : e.type === 'qr' ? '▣' : e.type === 'widget' ? ({ clock: '◷', date: '▦', ticker: '⇢', countdown: '⏳' })[e.kind] || '◷'
+    return e.type === 'text' ? 'T' : e.type === 'image' ? '▨' : e.type === 'video' ? '▶' : e.type === 'icon' ? '◇' : e.type === 'room' ? '▭' : e.type === 'qr' ? '▣' : e.type === 'widget' ? ({ clock: '◷', date: '▦', ticker: '⇢', countdown: '⏳', counter: '123' })[e.kind] || '◷'
       : ({ circle: '●', line: '—', arrow: '→' })[e.kind] || '■';
   }
   function label(e) {
@@ -2685,7 +2693,7 @@
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p[0]}"/><stop offset="1" stop-color="${p[1]}"/></linearGradient></defs><rect width="800" height="600" fill="url(#g)"/><circle cx="560" cy="170" r="70" fill="#fff" opacity=".55"/><path d="M0 600V400L190 250 360 420 520 300 800 470V600Z" fill="${p[2]}" opacity=".5"/><path d="M0 600V470L230 360 430 500 640 400 800 520V600Z" fill="${p[2]}" opacity=".8"/></svg>`;
     return 'data:image/svg+xml,' + encodeURIComponent(svg);
   }
-  const PV_LIVE = { clock: ['◷', 'heure en direct'], date: ['▦', 'mise à jour à minuit'], ticker: ['⇢', 'texte qui défile'], countdown: ['⏳', 'jours restants'] };
+  const PV_LIVE = { clock: ['◷', 'heure en direct'], date: ['▦', 'mise à jour à minuit'], ticker: ['⇢', 'texte qui défile'], countdown: ['⏳', 'jours restants'], counter: ['123', 'chiffre qui monte'] };
   function pvRows(t) {
     const els = t.make(), c = { text: 0, shape: 0, image: 0, qr: 0 }, live = [];
     els.forEach(e => { if (e.type === 'widget') { if (!live.includes(e.kind)) live.push(e.kind); } else c[e.type] = (c[e.type] || 0) + 1; });
@@ -2769,7 +2777,7 @@
     const inner = `<div class="st" style="width:${t.w}px;height:${t.h}px;background:${t.bg}">${LC().html({ els }, {})}</div>`;
     ov.querySelector('.ce-pvho').innerHTML = pv.view === 'page' ? `<div class="ce-pvpg">${inner}</div>`
       : `<div class="ce-pvtv"><div class="ce-pvbz"><div class="ce-pvsc">${inner}</div></div><div class="ce-pvst"></div></div>`;
-    LC().images(ov.querySelector('.ce-pvho'), (u, cb) => cb(u)); LC().videos(ov.querySelector('.ce-pvho'), (u, cb) => cb(u));
+    LC().images(ov.querySelector('.ce-pvho'), (u, cb) => cb(u)); LC().videos(ov.querySelector('.ce-pvho'), (u, cb) => cb(u)); LC().counters(ov.querySelector('.ce-pvho'));
     ov.querySelector('.ce-pvl').innerHTML = pvRows(t);
     pvFit();
   }

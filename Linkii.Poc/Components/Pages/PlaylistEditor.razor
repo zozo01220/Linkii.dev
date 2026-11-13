@@ -374,9 +374,11 @@ else
     var src = trItem ?? trpl.Draft.Skip(1).FirstOrDefault() ?? trpl.Draft.FirstOrDefault();
     var trNum = trpl.Draft.IndexOf(src!) + 1;
     <div class="modal-backdrop" @onclick="CloseTransition"></div>
-    <div class="modal pfx-trm" role="dialog" aria-modal="true" aria-labelledby="tr-title" style="max-width:520px">
+    @* Fenêtre « Transition », allégée : vignettes sans cadre (libellé court, complet au survol), durée en pastilles, pas de bouton OK :
+       le choix s'applique aussitôt, la croix ferme. *@
+    <div class="modal pfx-trm" role="dialog" aria-modal="true" aria-labelledby="tr-title">
         <div class="modal-head">
-            <div class="grow"><h3 id="tr-title">@(trAll ? "Transitions de la liste" : "Transition")</h3><small>@(trAll ? "Un même effet entre tous les contenus" : $"Entre le contenu {trNum - 1} et le contenu {trNum}")</small></div>
+            <h3 id="tr-title" class="grow">Transition@(trAll ? "" : $" · {trNum - 1} → {trNum}")</h3>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseTransition"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="modal-body">
@@ -384,17 +386,25 @@ else
                 @foreach (var t in Transitions.All)
                 {
                     var id = t.Id;
-                    <button type="button" role="radio" aria-checked="@(src!.Transition == id)" class="pfx-tro @(src.Transition == id ? "on" : "")" @onclick="() => SetTransition(trpl, src, id, null)"><span class="pfx-trp tr-@id"><i></i><i></i></span>@t.Label</button>
+                    var brief = t.Label.Replace("Glisser vers la ", "").Replace("Glisser vers le ", "");
+                    brief = char.ToUpper(brief[0]) + brief[1..];
+                    <button type="button" role="radio" aria-checked="@(src!.Transition == id)" aria-label="@t.Label" title="@t.Label" class="pfx-tro @(src.Transition == id ? "on" : "")" @onclick="() => SetTransition(trpl, src, id, null)"><span class="pfx-trp tr-@id"><i></i><i></i></span>@brief</button>
                 }
             </div>
             @if (src!.Transition != "cut")
             {
-                <label class="pfx-trd">Durée <input type="range" min="@Transitions.MinMs" max="@Transitions.MaxMs" step="100" value="@src.TransitionMs" @onchange="e => SetTransition(trpl, src, src.Transition, int.TryParse(e.Value?.ToString(), out var ms) ? ms : null)" /> <b class="mono">@((src.TransitionMs / 1000.0).ToString("0.0")) s</b></label>
+                var steps = new List<int> { 200, 400, 800, 1500 };
+                if (!steps.Contains(src.TransitionMs)) { steps.Add(src.TransitionMs); steps.Sort(); }   // durée réglée autrefois au curseur : elle garde sa pastille
+                <div class="pfx-trd" role="radiogroup" aria-label="Durée de la transition">
+                    <span class="grow">Durée</span>
+                    @foreach (var ms in steps)
+                    {
+                        var v = ms;
+                        <button type="button" role="radio" aria-checked="@(src.TransitionMs == v)" class="chip @(src.TransitionMs == v ? "on" : "")" @onclick="() => SetTransition(trpl, src, src.Transition, v)">@((v / 1000.0).ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("fr-FR"))) s</button>
+                    }
+                </div>
             }
-        </div>
-        <div class="modal-foot">
-            @if (!trAll && Modes.Expert) { <button class="btn ghost" @onclick="() => ApplyTransitionToAll(trpl, src)">Appliquer à toutes les transitions</button> }
-            <button class="btn" @onclick="CloseTransition">OK</button>
+            @if (!trAll && Modes.Expert) { <button type="button" class="pf-link pfx-trall" @onclick="() => ApplyTransitionToAll(trpl, src)">Appliquer à toutes les transitions</button> }
         </div>
     </div>
 }

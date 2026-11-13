@@ -39,6 +39,72 @@
     tick(); h.every(tick, 1000);
   });
 
+  /* ---------- Horloge pleine page : numérique ou à aiguilles, fond noir par défaut ----------
+     Tailles calculées en pixels depuis la zone (pas d'unités de conteneur : vieux WebView des écrans Android). */
+  A.register('clock-slide', function (h) {
+    var s = h.settings, el = h.el, analog = s.style === 'analog';
+    var bg = /^#[0-9a-fA-F]{6}$/.test(s.bg || '') ? s.bg : '#000000';
+    var n = parseInt(bg.slice(1), 16), light = ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 > 150;
+    var fg = /^#[0-9a-fA-F]{6}$/.test(s.color || '') ? s.color : (light ? '#0B1F3A' : '#FFFFFF');
+    var accent = /^#[0-9a-fA-F]{6}$/.test(s.color || '') ? s.color : '#E5484D';
+    var secs = s.showSeconds !== 'false', showDate = s.showDate !== 'false', numbers = s.numbers !== 'false', h12 = s.format === '12';
+    el.style.cssText += ';background:' + bg + ';color:' + fg + ';flex-direction:column;gap:0;font-family:"Inter","IBM Plex Sans",sans-serif';
+    var tz = s.timezone || (h.cfg && h.cfg.timezone) || undefined;
+    var svg = '', tEl, dEl, hh, mh, sh;
+    if (analog) {
+      var t = '', nn = '', i;
+      for (i = 0; i < 60; i++) { var major = i % 5 === 0; t += '<line x1="100" y1="' + (major ? 8 : 10) + '" x2="100" y2="' + (major ? 20 : 15) + '" stroke="currentColor" stroke-width="' + (major ? 2.2 : 0.8) + '" opacity="' + (major ? 1 : 0.5) + '" transform="rotate(' + i * 6 + ' 100 100)"/>'; }
+      if (numbers) for (i = 1; i <= 12; i++) { var a = i * Math.PI / 6; nn += '<text x="' + (100 + Math.sin(a) * 72).toFixed(1) + '" y="' + (105 - Math.cos(a) * 72).toFixed(1) + '" text-anchor="middle" font-weight="600" font-size="14" fill="currentColor">' + i + '</text>'; }
+      svg = '<svg viewBox="0 0 200 200" style="display:block"><circle cx="100" cy="100" r="96" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".35"/>' + t + nn +
+        '<line class="hh" x1="100" y1="100" x2="100" y2="54" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>' +
+        '<line class="mh" x1="100" y1="100" x2="100" y2="34" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>' +
+        (secs ? '<line class="sh" x1="100" y1="116" x2="100" y2="26" stroke="' + accent + '" stroke-width="1.5" stroke-linecap="round"/>' : '') +
+        '<circle cx="100" cy="100" r="4.5" fill="' + (secs ? accent : 'currentColor') + '"/></svg>';
+      el.innerHTML = '<div class="cs-face">' + svg + '</div><div class="cs-date"></div>';
+      hh = el.querySelector('.hh'); mh = el.querySelector('.mh'); sh = el.querySelector('.sh');
+    } else {
+      el.innerHTML = '<div class="cs-time"></div><div class="cs-date"></div>';
+      tEl = el.querySelector('.cs-time');
+    }
+    dEl = el.querySelector('.cs-date');
+    var face = el.querySelector('.cs-face');
+    function parts() {
+      var d = new Date(), o = { timeZone: tz }, p = { h: d.getHours(), m: d.getMinutes(), s: d.getSeconds(), ms: d.getMilliseconds(), date: '' };
+      try {
+        var q = new Intl.DateTimeFormat('en-GB', { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false, timeZone: tz }).format(d).split(':');
+        p.h = +q[0] % 24; p.m = +q[1]; p.s = +q[2];
+        if (showDate) { var ds = d.toLocaleDateString('fr-CH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: tz }); p.date = ds.charAt(0).toUpperCase() + ds.slice(1); }
+      } catch (e) { void o; }
+      return p;
+    }
+    function layout() {
+      var W = el.clientWidth || 1280, H = el.clientHeight || 720;
+      if (layout.k === W + 'x' + H) return;
+      layout.k = W + 'x' + H;
+      dEl.style.cssText = 'font-size:' + Math.round(Math.min(W * 0.042, H * 0.075)) + 'px;font-weight:300;opacity:.75;margin-top:' + Math.round(H * 0.035) + 'px;text-align:center;display:' + (showDate ? 'block' : 'none');
+      if (analog) { var d = Math.round(Math.min(W * 0.9, H * (showDate ? 0.74 : 0.88))); face.style.cssText = 'width:' + d + 'px;height:' + d + 'px'; }
+      else tEl.style.cssText = 'font-weight:800;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:' + Math.round(Math.min(W * (secs ? 0.19 : 0.27), H * 0.5)) + 'px';
+    }
+    function pad2(v) { return v < 10 ? '0' + v : '' + v; }
+    var tick = function () {
+      var p = parts();
+      dEl.textContent = p.date;
+      if (analog) {
+        var sec = p.s + p.ms / 1000, min = p.m + sec / 60, hr = (p.h % 12) + min / 60;
+        hh.setAttribute('transform', 'rotate(' + hr * 30 + ' 100 100)'); mh.setAttribute('transform', 'rotate(' + min * 6 + ' 100 100)');
+        if (sh) sh.setAttribute('transform', 'rotate(' + sec * 6 + ' 100 100)');
+      } else {
+        var hr2 = p.h, suf = '';
+        if (h12) { suf = hr2 >= 12 ? 'PM' : 'AM'; hr2 = hr2 % 12 || 12; }
+        var txt = pad2(hr2) + ':' + pad2(p.m) + (secs ? ':' + pad2(p.s) : '');
+        if (tEl._t !== txt + suf) { tEl._t = txt + suf; tEl.innerHTML = esc(txt) + (suf ? '<small style="font-size:.38em;font-weight:300;opacity:.6;margin-left:.12em">' + suf + '</small>' : ''); }
+      }
+    };
+    function esc(x) { return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+    layout(); tick();
+    h.every(function () { layout(); tick(); }, analog && secs ? 100 : 1000);
+  });
+
   /* ---------- Météo ---------- */
   var WMO = [
     [[0], '☀️'], [[1, 2], '🌤️'], [[3], '☁️'], [[45, 48], '🌫️'], [[51, 53, 55, 56, 57], '🌦️'],
