@@ -603,6 +603,27 @@ else
     </div>
 }
 
+@if (typeDlg)
+{
+    @* Mode Simple : la tuile « + » demande d'abord le type d'écran (maquette tuile-ajouter-type-ecran.html, variante C) *@
+    <div class="modal-backdrop picker-backdrop" @onclick="() => typeDlg = false"></div>
+    <div class="modal app-modal ty-dlg" role="dialog" aria-modal="true" aria-labelledby="ty-title">
+        <div class="modal-head"><div class="grow"><h3 id="ty-title">Quel type d'écran voulez-vous ajouter ?</h3></div><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => typeDlg = false"><Ico Name="x" Size="20" /></button></div>
+        <div class="modal-body ty-choices">
+            <button type="button" class="ty-choice" @onclick="() => { typeDlg = false; OpenConnect(); }"><span class="ty-ill">@TypePreview("diff")</span><b>Écran de diffusion</b><small>Affiche une liste de lecture. Le code s'affiche sur l'écran.</small></button>
+            <button type="button" class="ty-choice" @onclick="() => { typeDlg = false; OpenPairKiosk(); }"><span class="ty-ill">@TypePreview("kiosk")</span><b>Borne interactive</b><small>Écran tactile : le visiteur choisit ce qu'il veut voir.</small></button>
+            @if (roomApp)
+            {
+                <button type="button" class="ty-choice" @onclick="() => { typeDlg = false; OpenRoomWizard(null, null); }"><span class="ty-ill"><span class="ty-room"><span>Libre</span></span></span><b>Écran de salle</b><small>Tablette à la porte : salle libre ou occupée, réservation d'un geste.</small></button>
+            }
+            else
+            {
+                <div class="ty-choice lock"><span class="ty-ill"><span class="ty-room"><span>Libre</span></span></span><b>Écran de salle</b><small>Nécessite l'application « Réservation de salle ».</small><a class="btn go sm" href="/store">Ouvrir le Store</a></div>
+            }
+        </div>
+    </div>
+}
+
 @if (settingsFor is { } spId)
 {
     <ScreenSettingsDialog ScreenId="spId" OnClose="() => settingsFor = null" OnSaved="Reload" />
@@ -1403,17 +1424,17 @@ else if (wallEdit is { } wid)
     private bool TileMode => Modes.Simple && canAdd && !noArea && statusFilter != "offline" && (Shown.Count > 0 || NothingToShow && tab != LibraryTab.Shared && !(OtherAll.Count == 0 && !hasAnyScreen));
 
     private RenderFragment<bool> AddBlock => tile => @<div class="lx-add @(tile ? "as-tile" : "")">
-        <button type="button" class="btn lx-add-btn" aria-label="Ajouter" title="@(tile ? "Connecter un écran" : null)" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="@(tile ? 40 : 16)" />@if (!tile) { <text> Ajouter <Ico Name="chevron" Size="14" /></text> }</button>
+        <button type="button" class="btn lx-add-btn" aria-label="Ajouter" title="@(tile ? "Ajouter un écran" : null)" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => { if (tile) typeDlg = true; else newMenu = !newMenu; }"><Ico Name="plus" Size="@(tile ? 40 : 16)" />@if (!tile) { <text> Ajouter <Ico Name="chevron" Size="14" /></text> }</button>
         @if (newMenu)
         {
             <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
             <div class="kebab-menu lx-add-menu" role="menu">
                 <button type="button" role="menuitem" @onclick="OpenConnect"><Ico Name="monitor" Size="18" /><span><b>Écran de diffusion</b><small>Avec le code affiché sur l'écran</small></span></button>
-                <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPairKiosk(); }"><Ico Name="hand" Size="18" /><span><b>Borne interactive <span class="kiosk-new">Nouveau</span></b><small>Borne à écran tactile</small></span></button>
+                <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPairKiosk(); }"><Ico Name="hand" Size="18" /><span><b>Borne interactive</b><small>Borne à écran tactile</small></span></button>
                 @* Écran de salle : seulement avec l'application « Réservation de salle » ; sans elle, visible grisé (mode expert) avec le lien vers le Store *@
                 @if (roomApp)
                 {
-                    <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenRoomWizard(null, null); }"><Ico Name="door" Size="18" /><span><b>Écran de salle <span class="kiosk-new">Nouveau</span></b><small>Tablette à la porte d'une salle</small></span></button>
+                    <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenRoomWizard(null, null); }"><Ico Name="door" Size="18" /><span><b>Écran de salle</b><small>Tablette à la porte d'une salle</small></span></button>
                 }
                 else if (Modes.Expert)
                 {
@@ -1659,6 +1680,27 @@ else if (wallEdit is { } wid)
     }
 
     /// <summary>Aperçu d'une borne : la page d'accueil de sa liste interactive, pas sa liste de lecture d'inactivité.</summary>
+    // Aperçus de la fenêtre « Quel type d'écran ? » : une vraie liste de lecture / liste interactive de l'organisation si elle existe, sinon un exemple (marqué « Exemple »)
+    private RenderFragment TypePreview(string kind) => __builder =>
+    {
+        if (kind == "diff")
+        {
+            var m = playlists.Select(ZoneThumb).FirstOrDefault(x => x != null);
+            <span class="ty-tv">
+                @if (m != null) { @SlideThumb(m) }
+                else { <span class="ty-ex-d"><b>Menu du jour</b><i></i><i></i><i></i><em>Exemple</em></span> }
+            </span>
+        }
+        else
+        {
+            var il = interactiveLists.FirstOrDefault();
+            <span class="ty-kiosk">
+                @if (il != null) { <span class="kp-ck il"><InteractiveListThumb List="il" Files="media" /></span> }
+                else { <span class="ty-ex-k"><b>Touchez pour choisir</b><span><i>Plan</i><i>Menu</i><i>Agenda</i><i>Infos</i></span><em>Exemple</em></span> }
+            </span>
+        }
+    };
+
     private RenderFragment KioskPreview(Screen s) => __builder =>
     {
         var k = s.Kiosk!;
@@ -3077,6 +3119,7 @@ else if (wallEdit is { } wid)
     private void Edit(Screen s) { menuFor = null; if (s.Room != null) { OpenRoomWizard(s.Id, null); return; } if (s.Kiosk != null) { kioskOpen = s.Id; return; } editing = s.Id; }   // une borne s'ouvre dans son tiroir ; un écran de salle dans « Modifier l'écran de salle »
 
     // ---------- Écran de salle (application « Réservation de salle ») ----------
+    private bool typeDlg;                       // mode Simple : fenêtre « Quel type d'écran ? » ouverte par la tuile « + »
     private bool roomApp;                       // application installée : « Écran de salle » dans le menu Ajouter
     private bool roomWizardOpen, roomPairing;
     private Guid? roomWizardScreen, roomWizardRoom;

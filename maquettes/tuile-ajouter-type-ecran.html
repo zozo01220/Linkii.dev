@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Tuile « + » des écrans avec choix du type</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#1E8E5A;--danger:#C8372D;--radius:4px}
+*{box-sizing:border-box}html,body{margin:0}[hidden]{display:none!important}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h3,h4,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button{font:inherit;color:inherit}
+svg.i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.note{background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:10px 24px;font-size:13px;color:#6B5200}
+.pick{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:10px 24px;background:#fff;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}
+.seg button{border:0;background:#fff;padding:5px 12px;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--brand);color:#fff}
+main{padding:28px 40px 60px;max-width:1260px}
+.head{margin-bottom:20px}.head h1{font-size:28px;line-height:1.2}.head .sub{color:var(--muted);font-size:14px;margin-top:4px}
+.grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));align-items:stretch}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.thumb{height:150px;background:#0F1A2B;display:grid;place-items:center;position:relative;color:#fff}
+.tv{width:200px;height:100px;border:3px solid #2A2F36;border-radius:3px;background:linear-gradient(135deg,#2a5a7a,#7fb2c9 60%,#e8d6a8)}
+.kiosk{width:80px;height:120px;border:3px solid #2A2F36;border-radius:6px;background:linear-gradient(160deg,#3B82C4,#0B1F3A)}
+.room{width:130px;height:90px;border:3px solid #2A2F36;border-radius:6px;background:#1E8E5A;display:grid;place-items:center;font-size:13px}
+.tag{position:absolute;left:10px;bottom:8px;font-size:12px;display:flex;gap:6px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:#3FBF7F;display:inline-block}
+.body{padding:12px 14px 14px}.body b{font-size:16px;display:block}.body small{color:var(--muted);font-size:13px}
+
+/* tuile + */
+.tilew{position:relative;min-height:200px}
+.add-tile{width:100%;height:100%;min-height:200px;background:#fff;border:1px solid var(--line);border-radius:10px;display:grid;place-items:center;cursor:pointer;color:var(--ink);transition:border-color .15s,box-shadow .15s}
+.add-tile:hover,.add-tile.open{border-color:var(--signal);box-shadow:0 4px 14px rgba(11,31,58,.08)}
+.add-tile svg{width:44px;height:44px;stroke-width:1.4}
+
+/* A : menu ancré */
+.menu{position:absolute;left:50%;top:calc(50% + 34px);transform:translateX(-50%);width:310px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(11,31,58,.2);padding:6px;z-index:5}
+.menu button{display:flex;gap:12px;align-items:center;width:100%;text-align:left;border:0;background:none;padding:10px 12px;border-radius:6px;cursor:pointer}
+.menu button:hover{background:var(--brand-tint)}
+.menu .ic{width:38px;height:38px;border-radius:8px;background:var(--brand-tint);display:grid;place-items:center;flex:none}
+.menu small{display:block;color:var(--muted);font-size:13px;line-height:1.3}
+.menu .lock{opacity:.55}.menu .lock .ic{background:#F1F3F6}
+
+/* B : la tuile se déplie */
+.unfold{position:absolute;inset:0;background:#fff;border:1px solid var(--signal);border-radius:10px;display:flex;flex-direction:column;box-shadow:0 4px 14px rgba(11,31,58,.08)}
+.unfold header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);font-size:14px}
+.unfold header span{color:var(--muted);cursor:pointer}
+.unfold .opts{display:grid;grid-template-columns:repeat(3,1fr);flex:1}
+.unfold .opts button{border:0;border-right:1px solid var(--line);background:none;display:flex;flex-direction:column;gap:6px;align-items:center;justify-content:center;padding:8px;cursor:pointer;font-size:13px;text-align:center}
+.unfold .opts button:last-child{border:0}.unfold .opts button:hover{background:var(--brand-tint)}
+.unfold .opts .ic{width:44px;height:44px;border-radius:50%;background:var(--brand-tint);display:grid;place-items:center}
+.unfold .opts small{color:var(--muted);font-size:12px;line-height:1.25}
+
+/* C : fenêtre centrée */
+.scrim{position:fixed;inset:0;background:rgba(11,31,58,.45);display:none;place-items:center;z-index:20}
+.scrim.show{display:grid}
+.modal{background:#fff;border-radius:8px;width:min(760px,94vw);box-shadow:0 20px 50px rgba(11,31,58,.3)}
+.modal header{display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-bottom:1px solid var(--line)}
+.modal header h3{font-size:18px}.modal header span{cursor:pointer;color:var(--muted)}
+.modal .choices{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:22px}
+.choice{border:1px solid var(--line);border-radius:8px;padding:18px 14px;text-align:center;cursor:pointer;background:#fff;display:flex;flex-direction:column;gap:8px;align-items:center}
+.choice:hover{border-color:var(--signal);box-shadow:0 4px 14px rgba(11,31,58,.08)}
+.choice .ill{height:84px;display:grid;place-items:center}
+.choice .ill .tv{width:110px;height:64px}.choice .ill .kiosk{width:48px;height:76px}.choice .ill .room{width:90px;height:62px;font-size:11px}
+.choice small{color:var(--muted);font-size:13px;line-height:1.35}
+.choice.lock{opacity:.6;cursor:default}.choice.lock:hover{border-color:var(--line);box-shadow:none}
+.pill{font-size:11px;background:#E8F1FA;color:#245A8C;border-radius:9px;padding:1px 8px}
+.modal footer{padding:12px 22px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+.sec{margin:34px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:500}
+.dec{max-width:760px;color:var(--ink)}.dec li{margin-bottom:5px}
+</style>
+</head>
+<body>
+<div class="note"><b>Proposition :</b> en mode Simple, la tuile « + » de la page Écrans ne lance plus directement « Écran de diffusion » : elle demande d'abord le <b>type d'écran</b> (Diffusion, Borne interactive, Écran de salle). Plus besoin de passer en mode Expert. Trois présentations possibles : cliquez sur la tuile « + » pour les essayer.</div>
+<div class="pick">
+  <span>Présentation :</span>
+  <div class="seg" id="seg"><button data-v="A" class="on">A · Menu sous la tuile</button><button data-v="B">B · La tuile se déplie</button><button data-v="C">C · Fenêtre centrée</button></div>
+  <span>Application « Réservation de salle » :</span>
+  <div class="seg" id="seg2"><button data-r="1" class="on">Installée</button><button data-r="0">Pas installée</button></div>
+</div>
+
+<main>
+  <div class="head"><h1>Écrans</h1><div class="sub">2 écrans · mode Simple</div></div>
+  <div class="grid">
+    <div class="tilew" id="tilew">
+      <button class="add-tile" id="tile" aria-label="Ajouter un écran" title="Ajouter un écran"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      <div class="menu" id="menu" hidden></div>
+      <div class="unfold" id="unfold" hidden></div>
+    </div>
+    <div class="card"><div class="thumb"><div class="tv"></div><span class="tag"><i class="dot"></i> En ligne</span></div><div class="body"><b>Hall d'entrée</b><small>Écran de diffusion · Liste « Accueil »</small></div></div>
+    <div class="card"><div class="thumb"><div class="kiosk"></div><span class="tag"><i class="dot"></i> En ligne</span></div><div class="body"><b>Borne du rez</b><small>Borne interactive · Liste « Plan »</small></div></div>
+  </div>
+
+  <div class="sec">Ce qui se passe ensuite</div>
+  <ul class="dec">
+    <li><b>Écran de diffusion :</b> l'assistant actuel (code affiché sur l'écran, puis choix de la liste).</li>
+    <li><b>Borne interactive :</b> « Connecter une borne interactive » (orientation portrait proposée).</li>
+    <li><b>Écran de salle :</b> assistant « Nouvel écran de salle ». Si l'application n'est pas installée, le choix est grisé avec un lien « Obtenir dans le Store ».</li>
+    <li>Le mode Expert garde son bouton « Ajouter » avec le même menu ; seule la présentation en mode Simple change.</li>
+  </ul>
+  <div class="sec">Décision</div>
+  <p class="dec">Quelle présentation retenez-vous ? <b>A</b> est la plus légère (même geste qu'un menu), <b>B</b> garde tout dans la grille sans fenêtre, <b>C</b> est la plus explicite pour un nouvel utilisateur (illustrations et une phrase par type).</p>
+</main>
+
+<div class="scrim" id="scrim"><div class="modal" id="modal"></div></div>
+
+<script>
+const ICON={
+ diff:'<svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></svg>',
+ kiosk:'<svg class="i" viewBox="0 0 24 24"><path d="M9 11V6a1.5 1.5 0 0 1 3 0v5m0-1.5a1.5 1.5 0 0 1 3 0V11m0-.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2-3.5a1.5 1.5 0 0 1 2.4-1.7L9 15"/></svg>',
+ room:'<svg class="i" viewBox="0 0 24 24"><path d="M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M4 21h16"/><circle cx="14.5" cy="12.5" r=".6"/></svg>'
+};
+const TYPES=[
+ {k:'diff',t:'Écran de diffusion',s:'Affiche une liste de lecture. Le code s\'affiche sur l\'écran.',ill:'<div class="tv"></div>'},
+ {k:'kiosk',t:'Borne interactive',s:'Écran tactile : le visiteur choisit ce qu\'il veut voir.',ill:'<div class="kiosk"></div>',badge:1},
+ {k:'room',t:'Écran de salle',s:'Tablette à la porte : salle libre ou occupée, réservation d\'un geste.',ill:'<div class="room">Libre</div>',badge:1,needsApp:1}
+];
+let view='A',app=1,open=false;
+const $=id=>document.getElementById(id);
+const menu=$('menu'),unf=$('unfold'),tile=$('tile'),scrim=$('scrim');
+function lockTxt(t){return t.needsApp&&!app}
+function render(){
+  menu.hidden=!(open&&view==='A');unf.hidden=!(open&&view==='B');
+  scrim.classList.toggle('show',open&&view==='C');tile.classList.toggle('open',open);
+  menu.innerHTML=TYPES.map(t=>`<button class="${lockTxt(t)?'lock':''}"><span class="ic">${ICON[t.k]}</span><span><b>${t.t}${t.badge?' <span class="pill">Nouveau</span>':''}</b><small>${lockTxt(t)?'Nécessite l\'application « Réservation de salle » · Store':t.s}</small></span></button>`).join('');
+  unf.innerHTML=`<header><b>Quel type d'écran ?</b><span id="x1">✕</span></header><div class="opts">`+TYPES.map(t=>`<button class="${lockTxt(t)?'lock':''}" style="${lockTxt(t)?'opacity:.55':''}"><span class="ic">${ICON[t.k]}</span><b>${t.t.replace('Écran de ','')[0].toUpperCase()+t.t.replace('Écran de ','').slice(1)}</b><small>${lockTxt(t)?'Application requise':t.s.split('.')[0]}</small></button>`).join('')+`</div>`;
+  $('modal').innerHTML=`<header><h3>Quel type d'écran voulez-vous ajouter ?</h3><span id="x2">✕</span></header><div class="choices">`+TYPES.map(t=>`<div class="choice ${lockTxt(t)?'lock':''}"><div class="ill">${t.ill}</div><b>${t.t}</b><small>${t.s}</small>${lockTxt(t)?'<span class="pill">Disponible dans le Store</span>':''}</div>`).join('')+`</div><footer>Vous pourrez toujours changer le contenu affiché plus tard.</footer>`;
+  const x1=$('x1'),x2=$('x2');if(x1)x1.onclick=()=>{open=false;render()};if(x2)x2.onclick=()=>{open=false;render()};
+}
+tile.onclick=e=>{e.stopPropagation();open=!open;render()};
+document.addEventListener('click',e=>{if(open&&view!=='C'&&!$('tilew').contains(e.target)){open=false;render()}});
+scrim.onclick=e=>{if(e.target===scrim){open=false;render()}};
+document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>{view=b.dataset.v;document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));open=true;render()});
+document.querySelectorAll('#seg2 button').forEach(b=>b.onclick=()=>{app=+b.dataset.r;document.querySelectorAll('#seg2 button').forEach(x=>x.classList.toggle('on',x===b));render()});
+render();
+</script>
+</body>
+</html>
