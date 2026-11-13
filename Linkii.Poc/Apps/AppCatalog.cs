@@ -112,6 +112,9 @@ public class AppCatalog
             try
             {
                 var m = JsonSerializer.Deserialize<AppManifest>(File.ReadAllText(file), Json) ?? throw new InvalidDataException("vide");
+                // App retirée du catalogue (Seed.RetiredApps) : un manifeste resté sur le serveur après une mise à jour (déploiement qui ne supprime pas les anciens fichiers)
+                // ne la fait pas revenir, avec son ancien fournisseur et sa fenêtre d'avant. Ses contenus sont purgés au démarrage (Seed.PurgeRetiredApps).
+                if (Seed.RetiredApps.Contains(m.Id)) { log.LogWarning("App « {File} » retirée du catalogue : manifeste ignoré (à supprimer du serveur).", Path.GetFileName(file)); continue; }
                 var problems = Check(m);
                 if (_apps.Any(a => a.Id == m.Id)) problems.Add("identifiant déjà utilisé");
                 if (problems.Count > 0) { log.LogError("App « {File} » ignorée : {Problems}", Path.GetFileName(file), string.Join(" ; ", problems)); continue; }
