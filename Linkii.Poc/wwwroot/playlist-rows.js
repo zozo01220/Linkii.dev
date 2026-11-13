@@ -41,8 +41,19 @@
     });
   }
 
+  // Zone qui défile sous la liste : la zone du milieu de la page d'une liste (grand écran) ou, à défaut, la fenêtre
+  function scroller(el) {
+    for (var e = el.parentElement; e && e !== d.body; e = e.parentElement) {
+      var o = w.getComputedStyle(e).overflowY;
+      if (o === 'auto' || o === 'scroll') return e;
+    }
+    return null;
+  }
+  function sy() { return drag.sc ? drag.sc.scrollTop : w.scrollY; }
+
   function begin() {
     drag.started = true;
+    drag.sc = scroller(drag.list || drag.el);
     d.body.classList.add('le-dragging');
     var r = drag.el.getBoundingClientRect();
     var g = drag.el.cloneNode(true);
@@ -57,7 +68,7 @@
     else drag.el.classList.add('dragging');
     // positions de mise en page des lignes (les transform en cours ne les changent pas), en coordonnées de la page
     drag.rows = [].slice.call(drag.root.querySelectorAll(ROW));
-    drag.base = drag.rows.map(function (x) { var b = x.getBoundingClientRect(); return { top: b.top + w.scrollY, h: b.height }; });
+    drag.base = drag.rows.map(function (x) { var b = x.getBoundingClientRect(); return { top: b.top + sy(), h: b.height }; });
     drag.H = drag.rows.length > 1 ? drag.base[1].top - drag.base[0].top : drag.rows.length ? drag.base[0].h : 92;
     var lr = drag.list.getBoundingClientRect();
     drag.left = lr.left;
@@ -66,7 +77,7 @@
     drag.zone = drag.root.querySelector('.le-rows') || drag.list;
     if (drag.kind === 'add' && drag.zone !== drag.list) {
       var zt = drag.zone.getBoundingClientRect().top;
-      drag.zone.style.minHeight = Math.max(0, w.innerHeight - zt - 16) + 'px';
+      drag.zone.style.minHeight = Math.max(0, (drag.sc ? drag.sc.getBoundingClientRect().bottom : w.innerHeight) - zt - 16) + 'px';
       drag.zone.classList.add('le-dropzone');
     }
     drag.raf = w.requestAnimationFrame(tick);
@@ -96,7 +107,7 @@
     var k = drag.k;
     if (over || drag.kind === 'move') {
       k = 0;
-      var y = py + w.scrollY;
+      var y = py + sy();
       drag.rows.forEach(function (r, j) { if (j !== drag.from && drag.base[j].top + drag.base[j].h / 2 < y) k++; });
     } else k = null;   // hors de la liste : le contenu n'ajoute rien, les lignes se referment
     if (k !== drag.placed) {
@@ -112,7 +123,7 @@
       setShift(drag.loop, drag.kind === 'add' && k != null ? H : 0, true);
     }
     drag.k = k;
-    drag.target = k == null || !drag.base.length ? null : { x: drag.left, y: drag.base[0].top - w.scrollY + k * drag.H };
+    drag.target = k == null || !drag.base.length ? null : { x: drag.left, y: drag.base[0].top - sy() + k * drag.H };
   }
 
   function place() { drag.ghost.style.transform = 'translate(' + (drag.px - drag.ox) + 'px,' + (drag.py - drag.oy) + 'px) rotate(1.5deg)'; }
@@ -132,10 +143,10 @@
   // La page défile quand on s'approche du haut ou du bas de la fenêtre
   function tick() {
     if (!drag || !drag.started) return;
-    var v = 0, h = w.innerHeight;
-    if (drag.py < 90) v = -(90 - drag.py) / 4;
-    else if (drag.py > h - 90) v = (90 - (h - drag.py)) / 4;
-    if (v) { w.scrollBy(0, v); update(); }
+    var v = 0, box = drag.sc ? drag.sc.getBoundingClientRect() : { top: 0, bottom: w.innerHeight };
+    if (drag.py < box.top + 90) v = -(box.top + 90 - drag.py) / 4;
+    else if (drag.py > box.bottom - 90) v = (90 - (box.bottom - drag.py)) / 4;
+    if (v) { if (drag.sc) drag.sc.scrollTop += v; else w.scrollBy(0, v); update(); }
     drag.raf = w.requestAnimationFrame(tick);
   }
 
