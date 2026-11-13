@@ -28,6 +28,25 @@
         tilted = wall;
     });
 
+    // De temps en temps, une seule image sur tout le mur (mur vidéo) : chaque écran reçoit l'image entière, décalée de sa propre position dans le mur.
+    function pano() {
+        var wall = document.querySelector('.lw-wall');
+        if (!wall || !wall.offsetWidth || document.hidden || wall.classList.contains('hello')) return;
+        var scr = wall.querySelectorAll('.lw-scr');
+        for (var i = 0; i < scr.length; i++) {
+            var v = scr[i].querySelector('.lw-view'), p = v && v.querySelector('.lw-pano');
+            if (!p) continue;
+            var x = 0, y = 0, el = v;
+            while (el && el !== wall) { x += el.offsetLeft; y += el.offsetTop; el = el.offsetParent; }
+            if (!el) continue;
+            p.style.setProperty('--px', -x + 'px'); p.style.setProperty('--py', -y + 'px');
+            p.style.setProperty('--pw', wall.offsetWidth + 'px'); p.style.setProperty('--ph', wall.offsetHeight + 'px');
+        }
+        wall.classList.add('pano');
+        setTimeout(function () { wall.classList.remove('pano'); }, 6500);
+    }
+    if (!still) { setTimeout(pano, 8000); setInterval(pano, 24000); }
+
     document.addEventListener('submit', function (e) {
         if (!e.target.closest || !e.target.closest('.lg-main')) return;
         var wall = document.querySelector('.lw-wall');
