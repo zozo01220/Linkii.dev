@@ -54,7 +54,7 @@ public sealed class PlaylistDiffusion(TenantStore store, ScreenPublisher publish
 
     public void Load(Guid playlistId)
     {
-        if (playlistId != PlaylistId) { onSet.Clear(); whenSet.Clear(); targetSet.Clear(); revision = -1; }
+        if (playlistId != PlaylistId) { onSet.Clear(); whenSet.Clear(); targetSet.Clear(); WhenAll = null; revision = -1; }
         PlaylistId = playlistId;
         var (rows, many, outside, tz, rev) = store.Read(d =>
         {
@@ -85,7 +85,7 @@ public sealed class PlaylistDiffusion(TenantStore store, ScreenPublisher publish
         foreach (var r in rows)
         {
             r.On = onSet.TryGetValue(r.S.Id, out var on) ? on : Default(r);
-            r.When = whenSet.TryGetValue(r.S.Id, out var w) ? w : null;
+            r.When = whenSet.TryGetValue(r.S.Id, out var w) ? w : r.On ? WhenAll : null;
             r.Target = targetSet.TryGetValue(r.S.Id, out var t) && t < r.Zones.Count ? t : 0;
         }
         Rows = rows.OrderBy(r => r.A.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.S.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -99,7 +99,17 @@ public sealed class PlaylistDiffusion(TenantStore store, ScreenPublisher publish
     public IEnumerable<ScreenRow> ToUpdate => Rows.Where(r => r.Has && r.Stale);   // écrans dont la version est en retard
     public List<ScreenRow> Chosen => Rows.Where(r => r.On).ToList();
     public int OnAir => Rows.Count(r => r.Has);
-    public bool Changed => onSet.Count > 0 || whenSet.Count > 0 || targetSet.Count > 0;
+    public bool Changed => onSet.Count > 0 || whenSet.Count > 0 || targetSet.Count > 0 || WhenAll != null;
+
+    /// <summary>Fenêtre « Publier » : une seule heure pour tous les écrans activés (null : maintenant).</summary>
+    public DateTime? WhenAll { get; private set; }
+
+    public void SetWhenAll(DateTime? at)
+    {
+        WhenAll = at;
+        whenSet.Clear();
+        foreach (var r in Rows) r.When = r.On ? at : null;
+    }
 
     /// <summary>Libellé du bouton orange : publier, programmer, ou les deux.</summary>
     public string ButtonLabel()
@@ -117,6 +127,7 @@ public sealed class PlaylistDiffusion(TenantStore store, ScreenPublisher publish
         r.On = on;
         if (on == Default(r)) onSet.Remove(r.S.Id); else onSet[r.S.Id] = on;
         if (!on) { r.When = null; whenSet.Remove(r.S.Id); }
+        else if (r.When == null) r.When = WhenAll;
     }
 
     public void SetAll(bool on) { foreach (var r in on ? Rows.Where(r => r.Has) : Rows) SetOn(r, on); }
@@ -135,7 +146,7 @@ public sealed class PlaylistDiffusion(TenantStore store, ScreenPublisher publish
 
     public void Undo()
     {
-        onSet.Clear(); whenSet.Clear(); targetSet.Clear();
+        onSet.Clear(); whenSet.Clear(); targetSet.Clear(); WhenAll = null;
         foreach (var r in Rows) { r.On = Default(r); r.When = null; r.Target = 0; }
     }
 
@@ -179,6 +190,7 @@ public sealed class PlaylistDiffusion(TenantStore store, ScreenPublisher publish
         }
         finally { Busy = false; }
         foreach (var r in list) { onSet.Remove(r.S.Id); whenSet.Remove(r.S.Id); targetSet.Remove(r.S.Id); }
+        WhenAll = null;
         Load(PlaylistId);
         string Count(int n) => $"{n} écran{(n > 1 ? "s" : "")}";
         if (res?.Error != null) toast.Error(res.Error);

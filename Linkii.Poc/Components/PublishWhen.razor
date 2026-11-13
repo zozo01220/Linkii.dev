@@ -2,7 +2,8 @@
 
 @* Calendrier et heure (inchangés) pour la publication d'une liste.
    - Un écran (colonne « Quand » de l'onglet Diffusion) : choisit son heure, rien n'est publié avant le bouton orange ; « Maintenant » efface l'heure.
-   - Tous les écrans activés (menu ▾ du bouton « Publier ») : une même heure pour tous, programmée aussitôt. *@
+   - Tous les écrans activés (menu ▾ du bouton « Publier ») : une même heure pour tous, programmée aussitôt.
+   - Pick (fenêtre « Publier » allégée) : une même heure pour tous les écrans activés, seulement choisie ; rien n'est publié avant le bouton orange. *@
 @{
     var cal = new DateTime(calY, calM, 1);
     var first = ((int)cal.DayOfWeek + 6) % 7;
@@ -12,8 +13,8 @@
 }
 <div class="modal-backdrop" @onclick="Close"></div>
 <div class="modal pp-modal" role="dialog" aria-modal="true" aria-labelledby="pp-when-title">
-    <h3 id="pp-when-title">@(Target != null ? $"Quand publier sur « {Target.S.Name} » ?" : $"Programmer · {n} écran{(n > 1 ? "s" : "")}")</h3>
-    <p class="muted">@(pickDay is { } pd ? $"Publication le {pd.ToString("d MMMM yyyy", Fr)} à {pickH:00}:{pickM:00}." : Target != null ? "Aucune date choisie : publication maintenant." : "Choisissez le jour et l'heure.")</p>
+    <h3 id="pp-when-title">@(Pick ? "Quand publier ?" : Target != null ? $"Quand publier sur « {Target.S.Name} » ?" : $"Programmer · {n} écran{(n > 1 ? "s" : "")}")</h3>
+    <p class="muted">@(pickDay is { } pd ? $"Publication le {pd.ToString("d MMMM yyyy", Fr)} à {pickH:00}:{pickM:00}." : Target != null || Pick ? "Aucune date choisie : publication maintenant." : "Choisissez le jour et l'heure.")</p>
     <div class="pp-cal">
         <div class="pp-ch">
             <button type="button" class="pp-clk" aria-label="Mois précédent" @onclick="() => Month(-1)"><Ico Name="chevron-left" Size="16" /></button>
@@ -38,10 +39,10 @@
         <select @bind="pickM">@for (var m = 0; m < 60; m += 5) { <option value="@m">@m.ToString("00")</option> }</select>
     </div>
     <div class="pp-mf">
-        @if (Target != null) { <button type="button" class="btn ghost" @onclick="NowOne">Maintenant</button> }
+        @if (Target != null || Pick) { <button type="button" class="btn ghost" @onclick="NowOne">Maintenant</button> }
         <span class="grow"></span>
         <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
-        @if (Target != null)
+        @if (Target != null || Pick)
         {
             <button type="button" class="btn" disabled="@(pickDay == null)" @onclick="SaveOne">Enregistrer</button>
         }
@@ -55,6 +56,8 @@
 @code {
     [Parameter, EditorRequired] public PlaylistDiffusion Model { get; set; } = default!;
     [Parameter] public PlaylistDiffusion.ScreenRow? Target { get; set; }   // null : tous les écrans activés
+    /// <summary>Choisit l'heure commune à tous les écrans activés, sans rien publier (Target est alors ignoré).</summary>
+    [Parameter] public bool Pick { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnDone { get; set; }   // heure choisie pour un écran, ou programmation faite
 
@@ -63,7 +66,7 @@
 
     protected override void OnInitialized()
     {
-        var cur = Target?.When ?? Target?.Scheduled;
+        var cur = Pick ? Model.WhenAll : Target?.When ?? Target?.Scheduled;
         var basis = cur ?? Model.Now();
         calY = basis.Year; calM = basis.Month;
         pickDay = cur?.Date; pickH = cur?.Hour ?? 8; pickM = cur is { } c ? c.Minute / 5 * 5 : 0;
@@ -73,12 +76,13 @@
     private void Month(int by) { var d = new DateTime(calY, calM, 1).AddMonths(by); calY = d.Year; calM = d.Month; }
     private Task Close() => OnClose.InvokeAsync();
 
-    private Task NowOne() { if (Target != null) Model.SetWhen(Target, null); return OnDone.InvokeAsync(); }
+    private Task NowOne() { if (Pick) Model.SetWhenAll(null); else if (Target != null) Model.SetWhen(Target, null); return OnDone.InvokeAsync(); }
 
     private Task SaveOne()
     {
-        if (Target == null || At() is not { } at) return Task.CompletedTask;
-        Model.SetWhen(Target, at <= Model.Now() ? null : at);   // une heure déjà passée : maintenant
+        if (At() is not { } at || (Target == null && !Pick)) return Task.CompletedTask;
+        var t = at <= Model.Now() ? (DateTime?)null : at;
+        if (Pick) Model.SetWhenAll(t); else Model.SetWhen(Target!, t);   // une heure déjà passée : maintenant
         return OnDone.InvokeAsync();
     }
 

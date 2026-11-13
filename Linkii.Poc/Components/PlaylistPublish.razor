@@ -1,54 +1,35 @@
 @using System.Globalization
 @inject ModeService Modes
 
-@* Onglet « Diffusion » d'une liste (maquette maquettes/liste-diffusion-allegee.html) : tableau pleine largeur Écran · État · Diffuse actuellement ·
-   Changement · Quand · Publier. L'interrupteur « Publier » choisit les écrans qui reçoivent la modification ; éteint, l'écran garde sa version actuelle :
-   la liste n'en est jamais retirée (le retrait passe par le menu ⋯, avec confirmation). « Quand » : maintenant ou une heure choisie, écran par écran.
-   Écran multizone : sa ligne puis une ligne par zone ; un écran qui reçoit la liste choisit sa zone. Le bouton « Publier » est dans l'en-tête de la page. *@
-<div class="nx-diff">
+@* Fenêtre « Publier » d'une liste, allégée : une ligne par écran (dessin, nom, une ligne grise d'état) et son interrupteur. Ni bandeau ni colonnes.
+   L'interrupteur choisit les écrans qui reçoivent la modification ; éteint, l'écran garde sa version actuelle : la liste n'en est jamais retirée
+   (le retrait passe par le menu ⋯, avec confirmation). Le point orange à côté du nom : des modifications à publier.
+   Écran multizone : ses zones ne s'affichent qu'une fois l'écran activé, pour choisir celle qui reçoit la liste.
+   Le moment (maintenant ou une heure choisie, la même pour tous) et le bouton « Publier » sont dans le pied de la fenêtre. *@
+<div class="pb">
     @if (ItemsCount == 0)
     {
-        <div class="nx-dnote"><NxIco Name="list" Size="18" /> Le fil est vide : ajoutez d'abord des contenus, sinon les écrans choisis n'afficheront rien.<button type="button" class="btn ghost sm" @onclick="() => OnGoFil.InvokeAsync()">Aller au fil</button></div>
+        <div class="nx-dnote"><NxIco Name="list" Size="18" /> La liste est vide : ajoutez d'abord des contenus, sinon les écrans choisis n'afficheront rien.<button type="button" class="btn ghost sm" @onclick="() => OnGoFil.InvokeAsync()">Ajouter</button></div>
     }
-    @{
-        var chosen = Model.Chosen.Count;
-        var stale = Model.ToUpdate.Count();
-        RenderFragment legend = @<span class="nx-legend"><b></b> zone qui diffuse cette liste</span>;
-    }
-    @if (chosen > 0 || stale > 0)
+    @if (Model.Rows.Count == 0)
     {
-        <div class="nx-selbar"><Ico Name="upload" Size="17" />
-            <span class="nx-seltx"><b>@Model.ButtonLabel()</b>@(stale > 0 ? $" · {stale} à mettre à jour" : ""). Activez les écrans qui reçoivent la modification, maintenant ou à l'heure choisie. Un écran éteint garde sa version actuelle : la liste n'en est jamais retirée.</span>
-            @if (Model.OnAir > 0) { <span class="nx-all"><button type="button" class="pf-link" @onclick="() => All(true)">Tous</button> · <button type="button" class="pf-link" @onclick="() => All(false)">Aucun</button></span> }
-            @legend
-        </div>
+        <p class="pb-none">Aucun écran connecté pour l'instant.</p>
     }
     else
     {
-        <div class="nx-selbar ok"><Ico Name="check" Size="17" /><span class="nx-seltx">Tous les écrans sont à jour.</span>@legend</div>
+        var a = Model.Rows.Where(r => r.Has).ToList();
+        var b = Model.Rows.Where(r => !r.Has).ToList();
+        @if (a.Count > 0)
+        {
+            <div class="pb-grp"><span>Diffusée sur</span><span class="pb-all"><button type="button" class="pf-link" @onclick="() => All(true)">Tous</button> · <button type="button" class="pf-link" @onclick="() => All(false)">Aucun</button></span></div>
+            @foreach (var r in a) { @Row(r) }
+        }
+        @if (b.Count > 0)
+        {
+            <div class="pb-grp"><span>@(a.Count > 0 ? "Autres écrans" : "Écrans")</span></div>
+            @foreach (var r in b) { @Row(r) }
+        }
     }
-    <div class="nx-table">
-        @if (Model.Rows.Count == 0)
-        {
-            <p class="nx-none">Aucun écran connecté pour l'instant.</p>
-        }
-        else
-        {
-            <div class="nx-tr hd"><span>Écran</span><span>État</span><span>Diffuse actuellement</span><span>Changement</span><span>Quand</span><span class="r">Publier</span></div>
-            var a = Model.Rows.Where(r => r.Has).ToList();
-            var b = Model.Rows.Where(r => !r.Has).ToList();
-            @if (a.Count > 0)
-            {
-                <div class="nx-grp">Diffusée sur <span>@a.Count</span></div>
-                @foreach (var r in a) { @Row(r) }
-            }
-            @if (b.Count > 0)
-            {
-                <div class="nx-grp">Autres écrans <span>@b.Count</span></div>
-                @foreach (var r in b) { @Row(r) }
-            }
-        }
-    </div>
 </div>
 
 @if (removing is { } rm)
@@ -70,59 +51,54 @@
     [Parameter] public int ItemsCount { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
     [Parameter] public EventCallback OnGoFil { get; set; }
-    [Parameter] public EventCallback<PlaylistDiffusion.ScreenRow> OnProgram { get; set; }
 
     private PlaylistDiffusion.ScreenRow? removing;
     private Guid? menuFor;
 
     private RenderFragment Row(PlaylistDiffusion.ScreenRow r)
     {
-        var cls = $"nx-tr scr{(r.On ? " sel" : "")}{(r.Multi ? " multi" : "")}";
-        if (!r.Multi)
-        {
-            return @<div class="@cls">
-                <div class="nx-scn">@Glyph(r, null)<div><b>@r.S.Name</b><small>@Where(r)Monozone · @(r.Portrait ? "portrait" : "paysage")</small></div></div>
-                <div class="nx-st">@State(r)</div>
-                <div>@Now(r.Zones[0])</div>
-                <div class="nx-chg">@Change(r)</div>
-                <div>@When(r)</div>
-                <div class="nx-last">@More(r)@Switch(r)</div>
-            </div>;
-        }
-        var mine = r.Zones.Where(z => z.Init).Select(z => z.Index + 1).ToList();
-        var others = r.Zones.Count(z => !z.Init && z.Other != null);
-        var picking = r.On && !r.Has;   // l'écran reçoit la liste : on choisit sa zone
+        var picking = r.Multi && r.On && !r.Has;   // l'écran reçoit la liste : on choisit sa zone
         return @<text>
-            <div class="@cls">
-                <div class="nx-scn">@Glyph(r, null)<div><b>@r.S.Name</b><small>@Where(r)Multizone · @r.Zones.Count zones</small></div></div>
-                <div class="nx-st">@State(r)</div>
-                <div>
-                    @if (mine.Count > 0) { <span class="nx-now me">Cette liste en zone @string.Join(" et ", mine)</span> }
-                    else if (others > 0) { <span class="nx-now">@others autre@(others > 1 ? "s" : "") liste@(others > 1 ? "s" : "")</span> }
-                    else { <span class="nx-now">Aucune liste</span> }
+            <div class="pb-row @(r.On ? "sel" : "")">
+                @Glyph(r, null)
+                <div class="pb-tx">
+                    <b>@r.S.Name@if (r.Has && r.Stale) { <i class="pb-chg" title="@(r.On ? "Modifications à publier" : "Modifications à publier · pas dans cette publication")"></i> }</b>
+                    <small><i class="nx-dot @(r.Offline ? "off" : "")"></i>@Sub(r)</small>
                 </div>
-                <div class="nx-chg">@Change(r)</div>
-                <div>@When(r)</div>
-                <div class="nx-last">@More(r)@Switch(r)</div>
+                @More(r)@Switch(r)
             </div>
-            @foreach (var z in r.Zones)
+            @if (picking)
             {
-                var zone = z;
-                var target = picking && r.Target == zone.Index;
-                <div class="nx-tr zone @(r.On ? "sel" : "") @(picking ? "pickz" : "")" @onclick="() => Target(r, zone.Index)">
-                    <div class="nx-scn">@Glyph(r, zone.Index)<div><b>Zone @(zone.Index + 1)</b><small>@ZonePos(r, zone.Index)</small></div></div>
-                    <div></div>
-                    <div>@Now(zone)</div>
-                    <div class="nx-chg">@if (target) { <span class="nx-chip warn">Recevra la liste</span>@if (zone.Other != null) { <span>remplacera « @zone.Other »</span> } } else { <span class="no">—</span> }</div>
-                    <div></div>
-                    <div class="nx-last">@if (picking) { <label class="nx-zpick" @onclick:stopPropagation="true"><input type="radio" name="zone-@r.S.Id" checked="@target" @onchange="() => Target(r, zone.Index)" /> Ici</label> }</div>
-                </div>
+                @foreach (var z in r.Zones)
+                {
+                    var zone = z;
+                    var target = r.Target == zone.Index;
+                    <label class="pb-row zone">
+                        @Glyph(r, zone.Index)
+                        <div class="pb-tx"><b>Zone @(zone.Index + 1)</b><small>@ZonePos(r, zone.Index)@(target && zone.Other != null ? $" · remplacera « {zone.Other} »" : "")</small></div>
+                        <input type="radio" name="zone-@r.S.Id" checked="@target" aria-label="Publier en zone @(zone.Index + 1)" @onchange="() => Target(r, zone.Index)" />
+                    </label>
+                }
             }
         </text>;
     }
 
-    // Petite ligne sous le nom : l'aire, seulement s'il y en a plusieurs
-    private string Where(PlaylistDiffusion.ScreenRow r) => Model.ManyAreas ? r.A.Name + " · " : "";
+    // Ligne grise sous le nom : l'aire (s'il y en a plusieurs), l'état, puis seulement ce qu'il y a à dire
+    private string Sub(PlaylistDiffusion.ScreenRow r)
+    {
+        var parts = new List<string>();
+        if (Model.ManyAreas) parts.Add(r.A.Name);
+        parts.Add(r.Offline ? "Hors ligne" : "En ligne");
+        if (r.Offline && r.On) parts.Add("la recevra à sa reconnexion");
+        if (r.Multi)
+        {
+            var mine = r.Zones.Where(z => z.Init).Select(z => z.Index + 1).ToList();
+            parts.Add(mine.Count > 0 ? $"zone {string.Join(" et ", mine)}" : $"{r.Zones.Count} zones");
+        }
+        else if (!r.Has && r.On && r.Zones[0].Other is { } other) parts.Add($"remplacera « {other} »");
+        if (r.Scheduled is { } at) parts.Add($"programmée le {PlaylistDiffusion.Short(at)}");
+        return string.Join(" · ", parts);
+    }
 
     // Dessin de l'écran : ses zones côte à côte (empilées en portrait), celles qui portent la liste en bleu ; sur une ligne de zone, la zone concernée ressort
     private static RenderFragment Glyph(PlaylistDiffusion.ScreenRow r, int? focus)
@@ -137,42 +113,10 @@
             }</i></span>;
     }
 
-    private static RenderFragment State(PlaylistDiffusion.ScreenRow r) => r.Offline
-        ? @<text><span><i class="nx-dot off"></i>Hors ligne</span>@if (r.On) { <small>la recevra à sa reconnexion</small> }</text>
-        : @<span><i class="nx-dot"></i>En ligne</span>;
-
-    private static RenderFragment Now(PlaylistDiffusion.ZoneRow z) => z.Init
-        ? @<span class="nx-now me">Cette liste</span>
-        : z.Other != null ? @<span class="nx-now">« @z.Other »</span> : @<span class="nx-now">Aucune liste</span>;
-
-    // Changement : ne parle que s'il y a quelque chose à dire
-    private static RenderFragment Change(PlaylistDiffusion.ScreenRow r) => @<text>
-        @if (r.Has && r.Stale)
-        {
-            <span class="nx-chip warn">Modifications à publier</span>
-            @if (!r.On) { <span class="nx-later">pas dans cette publication</span> }
-        }
-        else if (r.Has && r.On) { <span class="nx-chip gone">Republiée telle quelle</span> }
-        else if (!r.Has && r.On)
-        {
-            <span class="nx-chip warn">À ajouter</span>
-            @if (!r.Multi && r.Zones[0].Other != null) { <span>remplacera « @r.Zones[0].Other »</span> }
-            else if (r.Multi) { <span>en zone @(r.Target + 1)</span> }
-        }
-        else if (r.Scheduled == null) { <span class="no">—</span> }
-        @if (r.Scheduled is { } at) { <span class="nx-chip plan" title="Publication déjà programmée"><Ico Name="clock" Size="12" /> Programmée le @PlaylistDiffusion.Short(at)</span> }
-    </text>;
-
-    // Quand : maintenant ou à l'heure choisie (calendrier), seulement pour un écran qui reçoit la publication
-    private RenderFragment When(PlaylistDiffusion.ScreenRow r) => !r.On ? @<text></text>
-        : @<button type="button" class="nx-when @(r.When != null ? "set" : "")" title="Publier maintenant ou à une heure choisie" @onclick="() => OnProgram.InvokeAsync(r)">
-            <Ico Name="clock" Size="14" /><span>@(r.When is { } w ? $"Le {PlaylistDiffusion.Short(w)}" : "Maintenant")</span><Ico Name="chevron" Size="12" />
-        </button>;
-
     // Menu ⋯ : retirer la liste de l'écran (avec confirmation), retirer une programmation ; seulement s'il y a quelque chose à proposer
     private RenderFragment More(PlaylistDiffusion.ScreenRow r)
     {
-        if (!r.Has && r.Scheduled == null) return @<span class="nx-more-gap"></span>;
+        if (!r.Has && r.Scheduled == null) return @<text></text>;
         var open = menuFor == r.S.Id;
         return @<span class="nx-mwrap">
             <button type="button" class="nx-more @(open ? "on" : "")" title="Plus d'actions" aria-label="Plus d'actions pour @r.S.Name" aria-haspopup="menu" aria-expanded="@(open ? "true" : "false")" @onclick="() => menuFor = open ? null : r.S.Id"><NxIco Name="more" Size="18" /></button>

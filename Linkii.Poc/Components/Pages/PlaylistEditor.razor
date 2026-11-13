@@ -98,7 +98,7 @@
                         <div class="kebab-backdrop" @onclick="() => listMenu = false"></div>
                         <div class="le-menu" role="menu">
                             @if (!readOnlyHere) { <button type="button" role="menuitem" @onclick="() => { listMenu = false; StartRename(pl); }"><Ico Name="edit" Size="16" /> Renommer</button> }
-                            <button type="button" role="menuitem" @onclick="() => { listMenu = false; whenFor = null; whenOpen = true; }"><Ico Name="calendar" Size="16" /> Programmer la diffusion…</button>
+                            <button type="button" role="menuitem" @onclick="() => { listMenu = false; whenPick = false; whenOpen = true; }"><Ico Name="calendar" Size="16" /> Programmer la diffusion…</button>
                             @if (!readOnlyHere && pl.Draft.Count > 1) { <button type="button" role="menuitem" @onclick="() => { listMenu = false; trAll = true; }"><Ico Name="transition" Size="16" /> Transitions…</button> }
                         </div>
                     }
@@ -208,36 +208,28 @@
     {
         @* « Publier la liste » : les écrans qui reçoivent la modification, maintenant ou à l'heure choisie *@
         <div class="modal-backdrop" @onclick="() => pubOpen = false"></div>
-        <div class="modal le-pubm" role="dialog" aria-modal="true" aria-labelledby="pub-title">
+        <div class="modal le-pubm pb-dlg" role="dialog" aria-modal="true" aria-labelledby="pub-title">
             <div class="modal-head">
-                <div class="grow"><h3 id="pub-title">Publier la liste</h3><small>@pl.Name</small></div>
+                <h3 id="pub-title" class="grow">Publier « @pl.Name »</h3>
                 <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => pubOpen = false"><Ico Name="x" Size="20" /></button>
             </div>
             <div class="modal-body">
-                <PlaylistPublish Model="diff" ItemsCount="pl.Draft.Count" OnChanged="StateHasChanged" OnGoFil="() => pubOpen = false" OnProgram="ProgramOne" />
+                <PlaylistPublish Model="diff" ItemsCount="pl.Draft.Count" OnChanged="StateHasChanged" OnGoFil="() => pubOpen = false" />
             </div>
             <div class="modal-foot">
-                @if (diff.Changed) { <button type="button" class="btn ghost" @onclick="() => diff.Undo()">Annuler les changements</button> }
+                @* un seul moment pour toute la publication : maintenant, ou une heure choisie pour tous les écrans activés *@
+                <button type="button" class="nx-when @(diff.WhenAll != null ? "set" : "")" title="Publier maintenant ou à une heure choisie" @onclick="() => { whenPick = true; whenOpen = true; }">
+                    <Ico Name="clock" Size="14" /><span>@(diff.WhenAll is { } wa ? $"Le {PlaylistDiffusion.Short(wa)}" : "Maintenant")</span><Ico Name="chevron" Size="12" />
+                </button>
+                @if (diff.Changed) { <button type="button" class="pf-link" @onclick="() => diff.Undo()">Annuler les changements</button> }
                 <span class="grow"></span>
-                <button type="button" class="btn ghost" @onclick="() => pubOpen = false">Fermer</button>
-                <div class="nx-split">
-                    <button type="button" class="btn publish-btn" disabled="@(chosen == 0 || diff.Busy)" title="@(chosen == 0 ? "Activez au moins un écran" : null)" @onclick="() => PublishNow(null)"><Ico Name="upload" Size="16" /> @diff.ButtonLabel()@if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
-                    <button type="button" class="btn publish-btn nx-caret" disabled="@(chosen == 0 || diff.Busy)" aria-label="Autres façons de publier" aria-haspopup="menu" aria-expanded="@(pubMenu ? "true" : "false")" @onclick="() => pubMenu = !pubMenu"><Ico Name="chevron" Size="16" /></button>
-                    @if (pubMenu)
-                    {
-                        <div class="kebab-backdrop" @onclick="() => pubMenu = false"></div>
-                        <div class="nx-menu up" role="menu">
-                            <button type="button" role="menuitem" @onclick="() => PublishNow(DateTime.MinValue)"><Ico Name="upload" Size="16" /><span>Tout publier maintenant<small>Sans tenir compte des heures choisies</small></span></button>
-                            <button type="button" role="menuitem" @onclick="() => { pubMenu = false; whenFor = null; whenOpen = true; }"><Ico Name="calendar" Size="16" /><span>Tout programmer…<small>Une même heure pour tous les écrans activés</small></span></button>
-                        </div>
-                    }
-                </div>
+                <button type="button" class="btn publish-btn" disabled="@(chosen == 0 || diff.Busy)" title="@(chosen == 0 ? "Activez au moins un écran" : null)" @onclick="() => PublishNow(null)"><Ico Name="upload" Size="16" /> @diff.ButtonLabel()@if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
             </div>
         </div>
     }
     @if (whenOpen)
     {
-        <PublishWhen Model="diff" Target="whenFor" OnClose="() => whenOpen = false" OnDone="WhenDone" />
+        <PublishWhen Model="diff" Pick="whenPick" OnClose="() => whenOpen = false" OnDone="WhenDone" />
     }
     @* import depuis les onglets Images / Vidéos : champ de fichiers caché (ouvert par « Importer ») et fenêtre « Depuis le cloud » (expert), gardés dans la page pour que l'import continue *@
     @if (canImport)
@@ -527,8 +519,7 @@ else
 
     // ---------- Diffusion : état partagé par l'en-tête (« Publier sur N écrans ») et l'onglet Diffusion ----------
     private PlaylistDiffusion diff = default!;
-    private bool pubMenu, whenOpen;
-    private PlaylistDiffusion.ScreenRow? whenFor;   // null : « Programmer… » des écrans cochés ; sinon menu ⋯ d'une ligne
+    private bool pubMenu, whenOpen, whenPick;   // whenPick : heure seulement choisie (pied de la fenêtre Publier) ; sinon « Programmer la diffusion… » programme aussitôt
     private ElementReference libRoot, libSearchInput;
 
     // null : chaque écran à son heure (maintenant si aucune) ; DateTime.MinValue : tous maintenant
@@ -687,9 +678,8 @@ else
         if (Current is { } cur) OpenSettings(cur, it, m);
     }
 
-    private void ProgramOne(PlaylistDiffusion.ScreenRow r) { whenFor = r; whenOpen = true; }
 
-    private void WhenDone() { whenOpen = false; whenFor = null; Reload(); }
+    private void WhenDone() { whenOpen = false; Reload(); }
 
     // Ajout d'un contenu : colonne des apps activées (hors widgets d'écran), à glisser dans le fil ou à cliquer (ajout à la fin).
     private List<AppManifest> enabledApps = new();

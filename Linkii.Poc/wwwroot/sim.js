@@ -59,7 +59,7 @@
       u.querySelector('[data-a=next]').innerHTML = icx('next');
       u.querySelector('[data-a=full]').innerHTML = icx('full');
       // fenêtre allégée : le contenu en cours et sa position, en étiquette sur l'image
-      if (u.classList.contains('sim-lite')) host.querySelector('.sim-frame').insertAdjacentHTML('beforeend', '<span class="nx-now" hidden></span>');
+      if (u.classList.contains('sim-lite')) host.querySelector('.sim-frame').insertAdjacentHTML('beforeend', '<span class="nx-cur" hidden></span>');
     }
     this.ui.querySelector(this.ext ? '.nx-ctl' : '.sim-bar').addEventListener('click', function (e) {
       var b = e.target.closest('[data-a]');
@@ -171,7 +171,7 @@
     play.innerHTML = icx(st && st.paused ? 'play' : 'pause', 17);
     play.title = st && st.paused ? 'Lecture' : 'Pause';
     play.setAttribute('aria-label', play.title);
-    var tl = u.querySelector('.nx-tl'), note = u.querySelector('.nx-note'), now = u.querySelector('.nx-now');
+    var tl = u.querySelector('.nx-tl'), note = u.querySelector('.nx-note'), now = u.querySelector('.nx-cur');
     if (now) {
       var cur = st && st.items[st.index];
       now.hidden = !cur;
