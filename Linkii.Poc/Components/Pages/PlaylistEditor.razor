@@ -36,19 +36,25 @@
             {
                 <div class="dw-note"><Ico Name="lock" Size="15" /><span class="grow">Cette liste est dans un dossier partagé en <b>lecture seule</b> : vous pouvez la voir et la diffuser, pas la modifier.</span></div>
             }
-            <div class="pt-crumb"><a href="playlists" @onclick="Close" @onclick:preventDefault>‹ Listes de diffusion</a></div>
+            @* En-tête : le titre (clic : renommer) à gauche ; à droite trois boutons (aperçu, publier, réglages) et, dessous, le résumé (contenus, durée, écrans).
+               Plus de lien de retour (le menu latéral reste déplié) ni de bandeau de relecture : son résultat passe en message standard (vert ou rouge). *@
             <header class="le-head">
-                <div>
-                    <div class="le-title @(readOnlyHere ? "ro" : "")">
-                        @if (renaming)
-                        {
-                            <input class="le-ni le-ni-h" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" @onblur="() => Rename(pl)" aria-label="Nom de la liste" />
-                        }
-                        else
-                        {
-                            <h1 @onclick="() => { if (!readOnlyHere) StartRename(pl); }">@pl.Name</h1>
-                            @if (!readOnlyHere) { <button type="button" class="le-ren" title="Renommer" aria-label="Renommer la liste" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }
-                        }
+                <div class="le-title @(readOnlyHere ? "ro" : "")">
+                    @if (renaming)
+                    {
+                        <input class="le-ni le-ni-h" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" @onblur="() => Rename(pl)" aria-label="Nom de la liste" />
+                    }
+                    else
+                    {
+                        <h1 @onclick="() => { if (!readOnlyHere) StartRename(pl); }">@pl.Name</h1>
+                        @if (!readOnlyHere) { <button type="button" class="le-ren" title="Renommer" aria-label="Renommer la liste" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }
+                    }
+                </div>
+                <div class="le-hact">
+                    <div class="le-act">
+                        <button type="button" class="le-ib" title="Aperçu" aria-label="Aperçu de la liste" disabled="@(pl.Draft.Count == 0)" @onclick="() => trying = true"><Ico Name="eye" Size="20" /></button>
+                        <button type="button" class="btn @(needs ? "publish-btn" : "ghost") le-pub" title="@pubTip" aria-label="@pubTip" disabled="@(pl.Draft.Count == 0 && air == 0 && chosen == 0)" @onclick="OpenPublish"><Ico Name="upload" Size="18" />@if (needs) { <span class="le-pubn" aria-hidden="true">@(chosen > 0 ? chosen : pend)</span> } @if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
+                        <button type="button" class="le-ib" title="Réglages de la liste" aria-label="Réglages de la liste" aria-haspopup="dialog" @onclick="OpenSettingsOfList"><NxIco Name="more" Size="20" /></button>
                     </div>
                     <p class="le-meta">
                         <span>@active contenu@(active > 1 ? "s" : "")@(pl.Draft.Count > 0 ? $" · {Helpers.FormatDuration(total)}" : "")</span>
@@ -58,10 +64,9 @@
                 </div>
             </header>
 
-            @* Relecture de l'IA avant publication (Pro) : bandeau, puis fenêtre « Avant de publier ». Maquette : maquettes/ia-pistes.html *@
+            @* Relecture de l'IA (Pro) : seuls restent ici le rappel du plan et la mise en pause ; le résultat est un message standard (voir RevToast). *@
             @if (pl.Draft.Count > 0)
             {
-                var pending = RevPending(pl);
                 @if (revState.Status == AiStatus.NeedsPro && pl.Draft.Any(i => !i.Off))
                 {
                     <div class="ai-bar up"><Ico Name="crown" Size="16" /><span>La relecture automatique avant publication est comprise dans le plan Pro.</span><span class="grow"></span><a class="btn ghost sm" href="/settings?tab=abonnement">Voir les plans</a></div>
@@ -70,40 +75,7 @@
                 {
                     <div class="ai-bar up"><Ico Name="alert" Size="16" /><span>Relecture de l'IA en pause : @(revState.Trial ? "les demandes de l'essai sont utilisées" : "quota du mois atteint"). Vous pouvez publier normalement.</span></div>
                 }
-                else if (revState.Available && revBusy && rev == null)
-                {
-                    <div class="ai-bar run" role="status"><Ico Name="spark" Size="16" /><span>Relecture de la liste en cours</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
-                }
-                else if (revState.Available && rev is { Ok: true })
-                {
-                    if (pending.Count > 0)
-                    {
-                        <div class="ai-bar"><Ico Name="spark" Size="16" /><span><b>Relecture de l'IA :</b> @pending.Count remarque@(pending.Count > 1 ? "s" : "") à regarder avant de publier.</span><span class="grow"></span><button type="button" class="btn ghost sm" @onclick="() => ShowReview(false)"><Ico Name="spark" Size="14" /> Voir dans l'assistant</button></div>
-                    }
-                    else
-                    {
-                        <div class="ai-bar ok"><Ico Name="check" Size="16" /><span><b>Relecture de l'IA :</b> rien à signaler.</span></div>
-                    }
-                }
             }
-
-            @* trois boutons au-dessus de la liste : aperçu, publier (icône seule : blanc si tout est à jour, orange s'il y a une modification), menu ⋯ *@
-            <div class="le-bar"><div class="le-act">
-                <button type="button" class="le-ib" title="Aperçu" aria-label="Aperçu de la liste" disabled="@(pl.Draft.Count == 0)" @onclick="() => trying = true"><Ico Name="eye" Size="20" /></button>
-                <button type="button" class="btn @(needs ? "publish-btn" : "ghost") le-pub" title="@pubTip" aria-label="@pubTip" disabled="@(pl.Draft.Count == 0 && air == 0 && chosen == 0)" @onclick="OpenPublish"><Ico Name="upload" Size="18" />@if (needs) { <span class="le-pubn" aria-hidden="true">@(chosen > 0 ? chosen : pend)</span> } @if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
-                <span class="le-dw">
-                    <button type="button" class="le-ib" title="Plus" aria-label="Plus d'actions" aria-haspopup="menu" aria-expanded="@(listMenu ? "true" : "false")" @onclick="() => listMenu = !listMenu"><NxIco Name="more" Size="20" /></button>
-                    @if (listMenu)
-                    {
-                        <div class="kebab-backdrop" @onclick="() => listMenu = false"></div>
-                        <div class="le-menu" role="menu">
-                            @if (!readOnlyHere) { <button type="button" role="menuitem" @onclick="() => { listMenu = false; StartRename(pl); }"><Ico Name="edit" Size="16" /> Renommer</button> }
-                            <button type="button" role="menuitem" @onclick="() => { listMenu = false; whenPick = false; whenOpen = true; }"><Ico Name="calendar" Size="16" /> Programmer la diffusion…</button>
-                            @if (!readOnlyHere && pl.Draft.Count > 1) { <button type="button" role="menuitem" @onclick="() => { listMenu = false; trAll = true; }"><Ico Name="transition" Size="16" /> Transitions…</button> }
-                        </div>
-                    }
-                </span>
-            </div></div>
 
             @* une ligne par contenu ; vide : une zone de dépôt qui dit quoi faire *@
             <div class="le-rows">
@@ -369,42 +341,72 @@ else
     </div>
 }
 
-@if ((trItem != null || trAll) && Current is { } trpl)
+@if (setOpen && Current is { } trpl)
 {
-    var src = trItem ?? trpl.Draft.Skip(1).FirstOrDefault() ?? trpl.Draft.FirstOrDefault();
-    var trNum = trpl.Draft.IndexOf(src!) + 1;
-    <div class="modal-backdrop" @onclick="CloseTransition"></div>
-    @* Fenêtre « Transition », allégée : vignettes sans cadre (libellé court, complet au survol), durée en pastilles, pas de bouton OK :
-       le choix s'applique aussitôt, la croix ferme. *@
-    <div class="modal pfx-trm" role="dialog" aria-modal="true" aria-labelledby="tr-title">
+    var src = trpl.Draft.Skip(1).FirstOrDefault() ?? trpl.Draft.FirstOrDefault();
+    var nSet = diff.Chosen.Count;
+    var planned = diff.Rows.Where(r => r.Scheduled != null).ToList();
+    <div class="modal-backdrop" @onclick="() => setOpen = false"></div>
+    @* Fenêtre « Réglages de la liste » (bouton ⋯ de l'en-tête) : transition entre les contenus, programmation de la publication et orientation,
+       au lieu d'un menu et de deux fenêtres. Transition et orientation s'appliquent aussitôt ; la croix ferme. *@
+    <div class="modal pfx-trm le-setm" role="dialog" aria-modal="true" aria-labelledby="tr-title">
         <div class="modal-head">
-            <h3 id="tr-title" class="grow">Transition@(trAll ? "" : $" · {trNum - 1} → {trNum}")</h3>
-            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseTransition"><Ico Name="x" Size="20" /></button>
+            <h3 id="tr-title" class="grow">Réglages de la liste</h3>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => setOpen = false"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="modal-body">
-            <div class="pfx-trg" role="radiogroup" aria-label="Type de transition">
-                @foreach (var t in Transitions.All)
-                {
-                    var id = t.Id;
-                    var brief = t.Label.Replace("Glisser vers la ", "").Replace("Glisser vers le ", "");
-                    brief = char.ToUpper(brief[0]) + brief[1..];
-                    <button type="button" role="radio" aria-checked="@(src!.Transition == id)" aria-label="@t.Label" title="@t.Label" class="pfx-tro @(src.Transition == id ? "on" : "")" @onclick="() => SetTransition(trpl, src, id, null)"><span class="pfx-trp tr-@id"><i></i><i></i></span>@brief</button>
-                }
-            </div>
-            @if (src!.Transition != "cut")
+            @if (!readOnlyHere && src != null && trpl.Draft.Count > 1)
             {
-                var steps = new List<int> { 200, 400, 800, 1500 };
-                if (!steps.Contains(src.TransitionMs)) { steps.Add(src.TransitionMs); steps.Sort(); }   // durée réglée autrefois au curseur : elle garde sa pastille
-                <div class="pfx-trd" role="radiogroup" aria-label="Durée de la transition">
-                    <span class="grow">Durée</span>
-                    @foreach (var ms in steps)
+                <h4 class="le-seth">Transition</h4>
+                <div class="pfx-trg" role="radiogroup" aria-label="Type de transition">
+                    @foreach (var t in Transitions.All)
                     {
-                        var v = ms;
-                        <button type="button" role="radio" aria-checked="@(src.TransitionMs == v)" class="chip @(src.TransitionMs == v ? "on" : "")" @onclick="() => SetTransition(trpl, src, src.Transition, v)">@((v / 1000.0).ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("fr-FR"))) s</button>
+                        var id = t.Id;
+                        var brief = t.Label.Replace("Glisser vers la ", "").Replace("Glisser vers le ", "");
+                        brief = char.ToUpper(brief[0]) + brief[1..];
+                        <button type="button" role="radio" aria-checked="@(src.Transition == id)" aria-label="@t.Label" title="@t.Label" class="pfx-tro @(src.Transition == id ? "on" : "")" @onclick="() => SetTransition(trpl, src, id, null)"><span class="pfx-trp tr-@id"><i></i><i></i></span>@brief</button>
                     }
                 </div>
+                @if (src.Transition != "cut")
+                {
+                    var steps = new List<int> { 200, 400, 800, 1500 };
+                    if (!steps.Contains(src.TransitionMs)) { steps.Add(src.TransitionMs); steps.Sort(); }   // durée réglée autrefois au curseur : elle garde sa pastille
+                    <div class="pfx-trd" role="radiogroup" aria-label="Durée de la transition">
+                        <span class="grow">Durée</span>
+                        @foreach (var ms in steps)
+                        {
+                            var v = ms;
+                            <button type="button" role="radio" aria-checked="@(src.TransitionMs == v)" class="chip @(src.TransitionMs == v ? "on" : "")" @onclick="() => SetTransition(trpl, src, src.Transition, v)">@((v / 1000.0).ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("fr-FR"))) s</button>
+                        }
+                    </div>
+                }
             }
-            @if (!trAll && Modes.Expert) { <button type="button" class="pf-link pfx-trall" @onclick="() => ApplyTransitionToAll(trpl, src)">Appliquer à toutes les transitions</button> }
+
+            <h4 class="le-seth">Programmation</h4>
+            @foreach (var pr in planned)
+            {
+                var row = pr;
+                <div class="le-setp"><Ico Name="clock" Size="14" /><span class="grow">@row.S.Name · le @PlaylistDiffusion.Short(row.Scheduled!.Value)</span><button type="button" class="pf-link" @onclick="() => { diff.CancelSchedule(row); }">Retirer</button></div>
+            }
+            @if (nSet == 0)
+            {
+                <p class="le-setn">Aucun écran à publier pour l'instant. Choisissez les écrans avec le bouton <button type="button" class="pf-link" @onclick="() => { setOpen = false; OpenPublish(); }">Publier</button>.</p>
+            }
+            else
+            {
+                <div class="le-setr">
+                    <input type="date" aria-label="Jour de la publication" min="@diff.Now().ToString("yyyy-MM-dd")" value="@progDate" @onchange='e => progDate = e.Value?.ToString() ?? ""' />
+                    <input type="time" aria-label="Heure de la publication" step="300" value="@progTime" @onchange='e => progTime = e.Value?.ToString() ?? ""' />
+                    <span class="grow"></span>
+                    <button type="button" class="btn sm" disabled="@(progDate.Length == 0 || diff.Busy)" @onclick="ProgramList">Programmer sur @nSet écran@(nSet > 1 ? "s" : "")</button>
+                </div>
+            }
+
+            <h4 class="le-seth">Orientation</h4>
+            <div class="le-setr" role="radiogroup" aria-label="Orientation de la liste">
+                <button type="button" role="radio" aria-checked="@(!setPortrait)" class="chip @(setPortrait ? "" : "on")" disabled="@readOnlyHere" @onclick="() => SetOrientation(trpl, false)"><span class="le-ori"></span> Paysage</button>
+                <button type="button" role="radio" aria-checked="@setPortrait" class="chip @(setPortrait ? "on" : "")" disabled="@readOnlyHere" @onclick="() => SetOrientation(trpl, true)"><span class="le-ori p"></span> Portrait</button>
+            </div>
         </div>
     </div>
 }
@@ -650,7 +652,21 @@ else
         catch (Exception) { if (!ct.IsCancellationRequested) rev = new AiReviewResult(false, new(), ""); }
         if (ct.IsCancellationRequested) return;
         revBusy = false;
-        await InvokeAsync(() => { revState = AiSvc.State(cid, "review"); StateHasChanged(); RevRefresh(); });
+        await InvokeAsync(() => { revState = AiSvc.State(cid, "review"); RevToast(); StateHasChanged(); RevRefresh(); });
+    }
+
+    // Résultat de la relecture en message standard : vert « rien à signaler », rouge s'il reste des remarques (bouton « Voir » : l'assistant).
+    // Une fois par liste, puis seulement quand le nombre de remarques change : pas de message à chaque modification.
+    private Guid revToastList;
+    private int revToastCount = -1;
+    private void RevToast()
+    {
+        if (Current is not { } pl || !revState.Available || rev is not { Ok: true }) return;
+        var n = RevPending(pl).Count;
+        if (revToastList == pl.Id && revToastCount == n) return;
+        revToastList = pl.Id; revToastCount = n;
+        if (n == 0) Toast.Ok("Relecture de l'IA : rien à signaler.");
+        else Toast.Error($"Relecture de l'IA : {n} remarque{(n > 1 ? "s" : "")} à regarder avant de publier.", "Voir", () => InvokeAsync(() => ShowReview(false)));
     }
 
     /// <summary>Remarques à regarder : celles que la personne n'a pas ignorées, sur des contenus encore publiés.</summary>
@@ -1277,17 +1293,24 @@ else
     }
 
     // ---------- Transitions entre les contenus ----------
-    private PlaylistItem? trItem;
-    private bool trAll;   // fenêtre « Transitions de la liste » (simple et expert) : un même effet pour tous les contenus
-    private void CloseTransition() { trItem = null; trAll = false; }
+    // Fenêtre « Réglages de la liste » : un même effet entre tous les contenus, la programmation de la publication, l'orientation.
+    private bool setOpen, setPortrait;
+    private string progDate = "", progTime = "08:00";
+
+    private void OpenSettingsOfList()
+    {
+        if (Current is not { } pl) return;
+        listMenu = false;
+        setPortrait = Store.Read(d => PlaylistShape.IsPortrait(pl, id => d.Media.FirstOrDefault(m => m.Id == id), d.Screens));
+        progDate = ""; progTime = "08:00";
+        setOpen = true;
+    }
 
     private void SetTransition(Playlist pl, PlaylistItem it, string type, int? ms)
     {
-        var id = it.Id;
-        var all = trAll;
         WriteList(d =>
         {
-            foreach (var x in all ? pl.Draft : new List<PlaylistItem> { it })
+            foreach (var x in pl.Draft)
             {
                 x.Transition = Transitions.Valid(type);
                 x.TransitionMs = ms is { } m ? Transitions.ValidMs(m) : it.TransitionMs;
@@ -1295,16 +1318,25 @@ else
             pl.Touch();
         });
         Reload();
-        if (!all) trItem = Current?.Draft.FirstOrDefault(x => x.Id == id);
     }
 
-    private void ApplyTransitionToAll(Playlist pl, PlaylistItem from)
+    // L'orientation est un réglage de la liste (carte, aperçu) : elle ne change pas ce que les écrans diffusent, rien n'est à republier.
+    private void SetOrientation(Playlist pl, bool portrait)
     {
-        var tr = from.Transition; var ms = from.TransitionMs;
-        WriteList(d => { foreach (var i in pl.Draft) { i.Transition = tr; i.TransitionMs = ms; } pl.Touch(); });
-        trItem = null;
-        Toast.Ok("Transition appliquée à tous les contenus.");
+        WriteList(d => pl.Orientation = portrait ? "portrait" : "landscape");
+        setPortrait = portrait;
         Reload();
+    }
+
+    // Programme la publication des écrans activés (ceux du bouton « Publier ») au jour et à l'heure choisis.
+    private async Task ProgramList()
+    {
+        if (!DateTime.TryParse(progDate + " " + (progTime.Length > 0 ? progTime : "08:00"), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var at) || at <= diff.Now())
+        {
+            Toast.Error("Choisissez un jour et une heure à venir.");
+            return;
+        }
+        if (await diff.Publish(at)) { Reload(); setOpen = false; }
     }
 
     private void ToggleOff(Playlist pl, PlaylistItem it)

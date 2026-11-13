@@ -448,15 +448,15 @@ else
             var portrait = PlaylistShape.IsPortrait(p, id => d.Media.FirstOrDefault(m => m.Id == id), d.Screens);
             // onglet Aperçu : ouvert d'office au format de l'écran qui diffuse la liste (en plein écran ou en zone 1)
             var on = screens.FirstOrDefault(s => s.ZonePlaylist(0) == p.Id && s.ZoneCount == 1) ?? screens.FirstOrDefault(s => s.ZonePlaylists().Contains(p.Id));
-            return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls, Portrait = portrait, OnScreen = on?.Id, Empty = p.Draft.Count == 0 };
+            return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls, Portrait = portrait, p.Orientation, OnScreen = on?.Id, Empty = p.Draft.Count == 0 };
         });
         if (info == null) { missing = true; title = "Aperçu"; return; }
         title = info.Name;
         likes = info.Screens.Select(s => ($"like:{s.Id}", $"{s.Name} · {(s.Orientation == "portrait" ? "portrait" : "paysage")}", s.Orientation, PlayerFeed.Resolution(s), 1, 1))
             .Concat(info.Walls.Select(x => ($"like:{x.Zone.Id}", $"{x.Zone.Name} · mur {x.Zone.WallCols} × {x.Zone.WallRows}", x.First!.Orientation, PlayerFeed.Resolution(x.First), x.Zone.WallCols, x.Zone.WallRows)))
             .ToList();
-        // onglet : le format de l'écran qui diffuse la liste ; fenêtre : toujours paysage à l'ouverture (rien n'est mémorisé)
-        fmt = !Inline ? "land" : info.OnScreen is { } sid ? $"like:{sid}" : info.Portrait ? "port" : "land";
+        // onglet : le format de l'écran qui diffuse la liste ; fenêtre : paysage à l'ouverture, sauf liste réglée en portrait (le format choisi dans la fenêtre n'est pas mémorisé)
+        fmt = !Inline ? (info.Orientation == "portrait" ? "port" : "land") : info.OnScreen is { } sid ? $"like:{sid}" : info.Portrait ? "port" : "land";
         emptyList = info.Empty;
         ApplyFormat();
         foot ="Joue la liste telle qu'elle est, même non publiée.";

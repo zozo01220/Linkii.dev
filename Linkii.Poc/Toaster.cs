@@ -18,6 +18,8 @@ public class Toaster
     public void Error(string? text) => Add(text, false);
     /// <summary>Confirmation avec un bouton (« Annuler »…) ; le message reste un peu plus longtemps pour laisser le temps de cliquer.</summary>
     public void Ok(string? text, string actionLabel, Func<Task> action) => Add(text, true, actionLabel, action);
+    /// <summary>Message rouge avec un bouton (« Voir »…).</summary>
+    public void Error(string? text, string actionLabel, Func<Task> action) => Add(text, false, actionLabel, action);
 
     /// <summary>Bouton du message : l'action, puis le message se ferme.</summary>
     public async Task Run(Toast t)

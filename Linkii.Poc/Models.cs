@@ -1198,6 +1198,8 @@ public class Playlist : IClientOwned, IAreaOwned, IOwned
     public List<PublishedItem> Published { get; set; } = new();  // ancien instantané : lu seulement par les écrans jamais publiés depuis
     public Guid? FolderId { get; set; }                            // dossier des listes de lecture (null : racine de l'aire). Voir <see cref="PlaylistFolder"/>
     public Guid? OwnerId { get; set; }                             // créateur (propriétaire) ; null : liste de l'organisation (d'avant les propriétaires)
+    /// <summary>Orientation choisie dans les réglages de la liste (« landscape » ou « portrait ») ; null : déduite de ses contenus (voir <see cref="PlaylistShape"/>).</summary>
+    public string? Orientation { get; set; }
 
     /// <summary>À appeler dans un Store.Write après toute modification du contenu de la playlist.</summary>
     public void Touch() { DraftChanged = true; Revision++; UpdatedAt = DateTime.UtcNow; }

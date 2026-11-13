@@ -96,7 +96,7 @@ public record PlaylistUse(int Screens, int Pending, int Slots, string? FirstSlot
 public record PlaylistDeleteImpact(List<string> Screens, List<string> Slots);
 
 /// <summary>
-/// Format d'une liste de lecture (elle n'en a pas en propre) : celui de la plupart de ses contenus pleine page qui ont une taille
+/// Format d'une liste de lecture : celui choisi dans ses réglages ; à défaut, celui de la plupart de ses contenus pleine page qui ont une taille
 /// (images, vidéos, compositions) ; à défaut, celui de la plupart des écrans qui la diffusent en plein écran ; sinon paysage.
 /// Sert à la carte (carrousel en portrait) et à l'ouverture de la fenêtre « Aperçu ».
 /// </summary>
@@ -104,6 +104,7 @@ public static class PlaylistShape
 {
     public static bool IsPortrait(Playlist p, Func<Guid, MediaItem?> media, IEnumerable<Screen> screens)
     {
+        if (p.Orientation is "portrait" or "landscape") return p.Orientation == "portrait";
         int port = 0, land = 0;
         foreach (var i in p.Draft.Where(i => i.Placement == "full" && !i.Off))
             switch (media(i.MediaId) is { } m ? Portrait(m) : null) { case true: port++; break; case false: land++; break; }
