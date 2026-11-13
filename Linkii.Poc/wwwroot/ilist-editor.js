@@ -137,6 +137,23 @@
     root = null; net = null; ac = null; S = null;
   }
 
+  /** L’assistant a enregistré cette liste : l’éditeur reprend sa version (après accord s’il y a des modifications non enregistrées). */
+  function replaced(docJson, name, images, contents) {
+    if (!S || !root) return;
+    if (S.dirty && !confirm('L’assistant a modifié cette liste. Charger sa version ? Vos modifications non enregistrées seront perdues.')) { toast('Version de l’assistant non chargée : si vous enregistrez, la vôtre la remplacera.', true); return; }
+    var doc = {}; try { doc = JSON.parse(docJson); } catch (x) { return; }
+    if (!doc.pages || !doc.pages.length) return;
+    var curId = page() && page().id;
+    closePop(); closePreview();
+    S.name = name || S.name; S.orientation = doc.orientation === 'landscape' ? 'landscape' : 'portrait'; S.pages = doc.pages;
+    S.pages.forEach(function (p) { p.els = p.els || []; p.len = p.len || 1; p.els.forEach(function (e) { e.action = e.action || { type: 'none', item: { qrOn: false } }; e.action.item = e.action.item || { qrOn: false }; }); });
+    if (images) S.images = images; if (contents) S.contents = contents;
+    S.cur = 0; S.pages.forEach(function (p, i) { if (p.id === curId) S.cur = i; });   // on reste sur la page regardée, si elle existe encore
+    S.sel = null; S.multi = []; S.dirty = false;
+    $('#ie-name').value = S.name; var d = $('#ie-dirty'); if (d) d.textContent = '';
+    draw(); toast('Liste mise à jour par l’assistant.');
+  }
+
   function toast(msg, err) {
     var t = $('#ie-toast'); if (!t) return;
     t.textContent = msg; t.className = 'ie-toast on' + (err ? ' err' : '');
@@ -678,5 +695,5 @@
     };
   }
 
-  w.LinkiiIListEditor = { mount: mount, unmount: unmount };
+  w.LinkiiIListEditor = { mount: mount, unmount: unmount, replaced: replaced };
 })(window);

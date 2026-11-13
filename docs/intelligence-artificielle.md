@@ -56,6 +56,16 @@ Demande du 13 novembre 2026 : l'assistant faisait toujours les mêmes écrans, e
 - **Pages selon l'activité** : en plus d'Accueil, Services et Merci (toujours là), l'IA garde jusqu'à quatre pages facultatives parmi liste avec prix (`prices`), offre du moment (`offer`), infos pratiques (`info`), chiffres clés (`numbers`), avis (`quote`) et actualité (`news`). Noms génériques, sans vocabulaire de métier.
 - **Ajouter une variante ou un type de page** : une fonction de dessin dans `StartTemplates` (paysage et portrait), son entrée dans `Kinds`, `Has`, `Name`, `Variants`, le contrôle dans `AiStarter.Fix`, la forme JSON et la règle dans `BriefSystem` / `Rules`, et `Diff` dans `AiStartView.razor`. Le test « Toutes les mises en page et tous les décors tiennent dans l'écran » couvre la nouvelle page sans autre réglage.
 
+## Listes interactives des bornes par l'assistant (§249)
+
+L'assistant crée et modifie les listes interactives (ce qu'un visiteur touche sur une borne), avec tout ce que fait leur éditeur : pages, tuiles, textes, images, boutons de navigation, mise en forme, action de chaque tuile, QR code, dates d'affichage, format.
+
+- **Opérations** : `ilist_create`, `ilist_edit`, `ilist_rename`, `ilist_duplicate`, `kiosk_set_ilist` (donner la liste à une borne). Repère `T1`, `NT1` pour une liste créée dans la réponse.
+- **Deux demandes à l'IA** : l'assistant propose l'action ; après confirmation, `AiInteractive.cs` fait construire la liste entière. L'IA ne voit que des repères (P pages, E éléments, I images, O contenus).
+- **Fusion et contrôle** : `AiInteractive.Merge` garde ce que l'IA ne renvoie pas, puis `InteractiveLists.Apply` contrôle le tout comme un enregistrement de l'éditeur. « Annuler » remet l'ancienne liste.
+- **Limites voulues** : pas de suppression d'une liste entière, pas de transformation d'un écran en borne, pas de publication.
+- **Toute nouvelle fonction de l'éditeur de liste interactive** s'ajoute à la consigne `AiInteractive.System` et à la ligne `ilist_edit` de la consigne de `AiAssistant`.
+
 ## Garde-fous
 
 - Pas de clé en clair, jamais dans le navigateur. Les images envoyées sont réduites (1 024 px, JPEG).
@@ -72,6 +82,7 @@ Demande du 13 novembre 2026 : l'assistant faisait toujours les mêmes écrans, e
 - **Jamais essayé avec la vraie API** : réflexion désactivée + effort faible acceptés par Haiku 5.5, authentification, qualité des descriptions, des mises en page et des propositions de l'assistant, enchaînement complet d'une programmation (§227 : testé seulement par `AiAssistantTests`, sans IA), réponse en flux de l'assistant (§228), choix d'une image par l'IA et vraie banque Pexels (§229 : essayés avec un faux serveur seulement), panneau de l'assistant et reprise d'une ancienne discussion (§230 : faux serveur seulement ; jamais avec plusieurs membres de la même organisation).
 - **Écrans adaptés à l'activité (§248)** : vérifiés par `AiStartTests` seulement (28 tests : rien ne sort de la page, deux textes ne se recouvrent pas, pour toutes les variantes, décors, polices et formats). Aucun rendu regardé à l'écran ; jamais lancé avec la vraie IA ni une vraie clé Pexels ; pertinence des photos et pastilles non essayées.
 - **Jamais essayé** : bouton sous les champs des applications (AppForm), publication depuis la page Écrans (non interceptée par la relecture), vraies images, photo du site importée, action de l'assistant sur un écran en ligne.
+- **Listes interactives (§249)** : création essayée avec un faux serveur IA et confirmée par l'utilisateur ; modification, copie, attribution à une borne et rechargement de l'éditeur jamais essayés dans le navigateur.
 
 ## Pas fait
 

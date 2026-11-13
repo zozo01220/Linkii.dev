@@ -81,6 +81,7 @@ builder.Services.AddSingleton<SecretBox>();
 builder.Services.AddSingleton<AiService>();   // intelligence artificielle : une clé pour toute la plateforme, quotas par organisation (voir Ai.cs)
 builder.Services.AddSingleton<AiReview>();   // relecture avant publication (piste 2) : dates passées, textes de modèle oubliés, fautes, textes trop petits
 builder.Services.AddSingleton<AiMedia>();   // médiathèque intelligente (piste 3) : description, mots-clés, cadrage des images
+builder.Services.AddSingleton<AiInteractive>();   // listes interactives des bornes créées ou modifiées par l assistant (ilist_create, ilist_edit)
 builder.Services.AddScoped<AiAssistant>();   // assistant : réponses et actions confirmées (piste 5)
 builder.Services.AddSingleton<AiCompose>();   // compositions créées par l IA : depuis une phrase, depuis le site web (piste 4)
 builder.Services.AddSingleton<WebImages>();   // images d'illustration d'internet (Pexels) pour les compositions de l IA

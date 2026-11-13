@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject Toaster Toast
 @inject ModeService Modes
+@inject AssistantPanel Panel
 
 @* Listes interactives (§168) : l'environnement tactile des bornes, créé une fois et assigné à une ou plusieurs bornes. Même squelette que les listes de lecture (§51) :
    fil d'Ariane en titre, dossiers (créer, ranger, partager, déplacer), cartes ou tableau, sélection multiple et barre noire d'actions.
@@ -427,7 +428,10 @@ else
     private List<(Guid Id, string Name)>? sharingItems, listMove;
     private List<InteractiveFolderRow> subfolders = new(), crumbs = new();
 
-    protected override void OnInitialized() => Load();
+    protected override void OnInitialized() { Load(); Panel.InteractiveChanged += OnAssistant; }
+
+    /// <summary>L'assistant a créé, copié ou modifié une liste interactive : la page se met à jour sans rechargement.</summary>
+    private void OnAssistant(Guid _) => InvokeAsync(() => { Load(); StateHasChanged(); });
 
     private void Load()
     {
@@ -628,5 +632,5 @@ else
     private void ToggleAll() { if (AllPicked) picked.Clear(); else foreach (var l in Sorted) picked.Add(l.Id); }
     private List<(Guid Id, string Name)> PickedEditable() => lists.Where(x => picked.Contains(x.Id) && CanEdit(x)).Select(x => (x.Id, x.Name)).ToList();
 
-    public void Dispose() { }
+    public void Dispose() => Panel.InteractiveChanged -= OnAssistant;
 }

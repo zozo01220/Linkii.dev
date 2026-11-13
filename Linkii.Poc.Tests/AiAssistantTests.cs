@@ -22,7 +22,30 @@ public class AiAssistantTests
     object Ctx(bool web) => Activator.CreateInstance(CtxType,
         new Dictionary<string, Guid> { ["S1"] = screen }, new Dictionary<string, Guid> { ["L1"] = list }, new Dictionary<string, List<Guid>> { ["L1"] = new() },
         new Dictionary<string, Guid> { ["C1"] = comp }, new Dictionary<string, Guid> { ["M1"] = photo }, new Dictionary<string, Guid>(),
-        new Dictionary<Guid, string> { [screen] = "Ecran Com", [list] = "Ma Liste", [comp] = "Chiffres clés", [photo] = "Lac au matin" }, "", web)!;
+        new Dictionary<Guid, string> { [screen] = "Ecran Com", [list] = "Ma Liste", [comp] = "Chiffres clés", [photo] = "Lac au matin", [board] = "Accueil mairie" }, "", web,
+        new Dictionary<string, Guid> { ["T1"] = board })!;
+
+    readonly Guid board = Guid.NewGuid();
+
+    [Fact]
+    public void Une_liste_interactive_se_cree_se_modifie_et_se_donne_a_une_borne()
+    {
+        var acts = Build("""
+            [{"op":"ilist_create","name":"Accueil visiteurs","sentence":"Trois tuiles : plan, horaires, contact","portrait":false,"ref":"NT1"},
+             {"op":"kiosk_set_ilist","screens":["S1"],"ilist":"NT1"},
+             {"op":"ilist_edit","ilist":"T1","change":"Ajoute une page Horaires et un bouton Accueil"},
+             {"op":"ilist_duplicate","ilist":"T1","ref":"NT2"},
+             {"op":"ilist_rename","ilist":"NT2","name":"Accueil été"},
+             {"op":"ilist_edit","ilist":"T9","change":"repère inconnu"}]
+            """);
+        Assert.Equal(new[] { "ilist_create", "kiosk_set_ilist", "ilist_edit", "ilist_duplicate", "ilist_rename" }, acts.Select(a => a.Op));
+        Assert.Equal("False", acts[0].A["portrait"]);
+        Assert.Equal(acts[0].A["id"], acts[1].A["t"]);              // la borne reçoit la liste créée juste avant
+        Assert.Equal(screen.ToString(), acts[1].A["s"]);
+        Assert.Equal(board.ToString(), acts[2].A["t"]);
+        Assert.Equal(acts[3].A["id"], acts[4].A["t"]);              // la copie se renomme par son repère
+        Assert.Contains("Accueil mairie (copie)", acts[3].Label);
+    }
 
     /// <summary>Comme <c>Ask</c> : les actions de la réponse, construites dans l'ordre.</summary>
     List<AiAction> Build(string json, object? context = null) =>

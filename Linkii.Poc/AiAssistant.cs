@@ -31,7 +31,8 @@ public record AiProgress(AiStep Step, string Read, string Say, IReadOnlyList<str
 /// de liste attend le bouton « Publier » (les calendriers, eux, s'appliquent tout de suite comme sur leur page).
 /// </summary>
 public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCompose compose, AiReview review, NoticeService notices, DeviceCommandService commands,
-    ScreenControl control, Notifier notifier, AppService apps, MediaLibrary library, HistoryLog history, WebImages webImages, AssistantPanel panel, ILogger<AiAssistant> log)
+    ScreenControl control, Notifier notifier, AppService apps, MediaLibrary library, HistoryLog history, WebImages webImages, AssistantPanel panel, AiInteractive interactive,
+    Microsoft.AspNetCore.Components.NavigationManager nav, ILogger<AiAssistant> log)
 {
     private const int MaxActions = 25, MaxChars = 600;
     private static readonly string[] Commands = { "restart-player", "screen-off", "wake", "reboot" };
@@ -41,7 +42,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
 
     private const string System = """
         Tu es l'assistant de Linkivi, un logiciel d'affichage dynamique. Tu aides une personne à suivre et à gérer ses écrans, ses listes de diffusion, ses compositions et ses images, en français, de façon brève.
-        Tu reçois l'état de son organisation avec des repères (S1 écrans, L1 listes, C1 compositions, M1 images, K1 calendriers), le début de la conversation, puis sa demande.
+        Tu reçois l'état de son organisation avec des repères (S1 écrans, L1 listes, C1 compositions, M1 images, K1 calendriers, T1 listes interactives), le début de la conversation, puis sa demande.
         Réponds uniquement par un objet JSON, sans commentaire autour : {"say":"réponse en une à trois phrases","actions":[ ... ],"open":null}
         Chaque action est un objet avec « op » et ses champs. Un champ « screens » est une liste de repères S. Opérations :
         ÉCRANS
@@ -62,17 +63,23 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         - composition_edit {composition:"C1",change:"la modification, précise et complète",photo:null} (modifie TOUT ce qu'on veut dans une composition : textes, mise en page, tailles, couleurs, polices, fond, format portrait ou paysage, éléments ajoutés, déplacés ou supprimés, formes, horloge, date, bandeau défilant, compte à rebours, code QR, images ; « photo » : "M1" pour placer cette image de la médiathèque, "auto" pour en chercher une qui convient, "web" pour une photo neutre d'internet, null sinon ; une seule action par composition et par demande : mets-y toutes les modifications)
         - composition_rename {composition,name} · composition_duplicate {composition,name,ref:"NC1"} (copie à modifier ensuite, l'originale ne change pas)
         Une composition « (ouverte) » est celle que la personne a sous les yeux : « ici », « cette compo », « la page » parlent d'elle.
+        LISTES INTERACTIVES (ce qu'un visiteur touche sur une borne tactile : des pages de tuiles, de textes et d'images ; repères T ; rien à voir avec les listes de diffusion L)
+        - ilist_create {name,sentence:"tout ce que la liste doit proposer",portrait:true,ref:"NT1"} (crée la liste entière : pages, tuiles, textes, images, boutons de navigation, contenus ouverts par les tuiles ; « portrait » : le format de la borne visée, true si on ne sait pas)
+        - ilist_edit {ilist:"T1",change:"la modification, précise et complète"} (modifie TOUT ce qu'on veut dans une liste interactive. Pages : en ajouter, renommer, dupliquer, réordonner, supprimer, choisir la page d'accueil, couleur ou image de fond d'une page ou de toutes, longueur d'une page de 1 à 6 écrans qui défilent. Éléments : ajouter, déplacer, redimensionner, aligner, répartir, ranger en grille, dupliquer ou supprimer des tuiles, des textes, des images et des boutons « Accueil », « Retour » ou vers une page. Tuile : titre, sous-titre, taille, couleur et police du texte, gras, alignement, place du texte, couleur ou image de fond, arrondi ; ce qu'elle fait au toucher : ouvrir un contenu (média, PDF, présentation, composition, page web), ouvrir une page, retourner à l'accueil, revenir en arrière, rien ; QR code « Emporter sur mon téléphone » ; dates entre lesquelles elle s'affiche. Format portrait ou paysage. Une seule action par liste interactive et par demande : mets-y toutes les modifications)
+        - ilist_rename {ilist,name} · ilist_duplicate {ilist,name,ref:"NT1"} (copie à modifier ensuite, l'originale ne change pas)
+        - kiosk_set_ilist {screens,ilist:"T1"} (donne la liste interactive à des bornes : seulement des écrans marqués « borne tactile » ; à publier ensuite par la personne)
+        Dans « sentence » et « change », écris toute la demande avec les noms exacts des contenus, des images et des pages : l'IA qui construit la liste ne voit pas la conversation. Une liste interactive « (ouverte) » est celle que la personne a sous les yeux.
         PLANNING ET RÉGLAGES
         - calendar_create {name,list,ref:"NK1"} (« list » : liste jouée hors des événements) · calendar_event {calendar,kind:play|off,list,days:[1..7 lundi=1] (absent : tous les jours),from:"HH:mm",to:"HH:mm",always:false} · calendar_assign {screens,calendar:"K1"}
         - alert_delay {minutes:1|5|10|15|30|60} (délai avant l'alerte « écran hors ligne »)
-        « open » : un repère (S1, L1, C1) ou « media », « screens », « playlists », « programmations », « settings », sinon null.
-        ENCHAÎNER : les actions s'exécutent dans l'ordre. Une liste, un calendrier ou une composition que tu crées reçoit dans « ref » un nouveau repère (« NL1 », « NL2 »… pour une liste, « NK1 »… pour un calendrier, « NC1 »… pour une composition) que les actions suivantes utilisent comme les autres. Crée d'abord, utilise ensuite.
+        « open » : un repère (S1, L1, C1, T1) ou « media », « screens », « playlists », « interactive », « programmations », « settings », sinon null.
+        ENCHAÎNER : les actions s'exécutent dans l'ordre. Une liste, un calendrier ou une composition que tu crées reçoit dans « ref » un nouveau repère (« NL1 », « NL2 »… pour une liste, « NK1 »… pour un calendrier, « NC1 »… pour une composition, « NT1 »… pour une liste interactive) que les actions suivantes utilisent comme les autres. Crée d'abord, utilise ensuite.
         Fais tout l'enchaînement qu'une demande implique dans la même réponse, sans t'arrêter à la première étape. Un « planning » ou une « programmation » est un calendrier.
         Exemple « programme la compo C2 de 9 h à 11 h sur l'écran S1 » :
           1. la liste : une liste existante qui contient C2 (ou une liste vide du même nom : list_add dedans), sinon list_create {name,ref:"NL1"} puis list_add {list:"NL1",content:"C2"} ;
           2. le calendrier : si S1 a un calendrier qui ne sert qu'à lui, calendar_event dessus ; sinon calendar_create {name,list: la liste que S1 joue aujourd'hui (sinon NL1),ref:"NK1"}, calendar_event {calendar:"NK1",kind:"play",list:"NL1",from:"09:00",to:"11:00"}, calendar_assign {screens:["S1"],calendar:"NK1"}.
         Règles : n'agis que sur ce qui est demandé ; garde en tête la conversation (« sur celui-là aussi » parle de ce dont on vient de parler). Si la demande est floue ou vise ce que tu ne reconnais pas, pose une question dans « say » et laisse « actions » vide.
-        Tu ne publies jamais, tu ne supprimes aucun écran, liste, composition, média ni membre, tu n'éteins pas l'appareil : explique-le et propose « open ». Un écran hors ligne ne reçoit pas de message ni de commande : dis-le.
+        Tu ne publies jamais, tu ne supprimes aucun écran, liste, liste interactive, composition, média ni membre, tu n'éteins pas l'appareil : explique-le et propose « open ». Un écran hors ligne ne reçoit pas de message ni de commande : dis-le.
         N'invente aucun repère. N'écris dans un message ou un texte que ce que la personne demande. Pour répondre à une question (état, historique, recherche d'image), « actions » reste vide.
         """;
 
@@ -80,7 +87,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
 
     /// <summary>Ce que l'IA a vu (repères → identifiants) ; <paramref name="Web"/> : l'organisation peut recevoir des images d'internet.</summary>
     private record Ctx(Dictionary<string, Guid> Screens, Dictionary<string, Guid> Lists, Dictionary<string, List<Guid>> Items, Dictionary<string, Guid> Comps,
-        Dictionary<string, Guid> Media, Dictionary<string, Guid> Cals, Dictionary<Guid, string> Names, string Text, bool Web);
+        Dictionary<string, Guid> Media, Dictionary<string, Guid> Cals, Dictionary<Guid, string> Names, string Text, bool Web, Dictionary<string, Guid> ILists);
 
     private Ctx Context(string request)
     {
@@ -101,6 +108,13 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
             var listKey = shownLists.Select((p, n) => (p.Id, K: "L" + (n + 1))).ToDictionary(x => x.Id, x => x.K);
             var calKey = shownCals.Select((c, n) => (c.Id, K: "K" + (n + 1))).ToDictionary(x => x.Id, x => x.K);
             var screenKey = new Dictionary<Guid, string>();
+            // listes interactives des bornes : celle qui est ouverte (son adresse est dans la conversation) puis celles qui sont nommées
+            var ilists = new Dictionary<string, Guid>();
+            var ilRights = InteractiveListOps.Rights(d);
+            bool IOpen(InteractiveList l) => request.Contains(l.Id.ToString(), StringComparison.OrdinalIgnoreCase);
+            var shownIl = d.InteractiveLists.OrderByDescending(IOpen).ThenByDescending(l => l.Name.Length > 2 && norm.Contains(AiMedia.Norm(l.Name)))
+                .ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).Take(30).ToList();
+            var ilKey = shownIl.Select((l, n) => (l.Id, K: "T" + (n + 1))).ToDictionary(x => x.Id, x => x.K);
             var sb = new StringBuilder("Écrans :\n");
             var i = 0;
             foreach (var s in d.AllScreens.Where(s => s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Take(60))
@@ -110,6 +124,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 var pars = s.Params.Count > 0 ? " · variables : " + string.Join(", ", s.Params.Take(5).Select(p => $"{p.Name}={p.Value}")) : "";
                 var lk = v.Playlist != null && listKey.TryGetValue(v.Playlist.Id, out var lkk) ? $" ({lkk})" : "";
                 var cal = s.CalendarId is { } scid ? " · calendrier : " + (calKey.TryGetValue(scid, out var ckk) ? ckk : "oui") : "";
+                if (s.Kiosk is { } kc) cal += $" · borne tactile ({(InteractiveLists.Portrait(s.Orientation) ? "portrait" : "paysage")}), liste interactive : {(kc.ListId is { } kl ? ilKey.GetValueOrDefault(kl, "oui") : "aucune")}";
                 sb.Append($"{key} · {s.Name} · {(v.Online ? (v.Asleep ? "en ligne, en veille" : "en ligne") : "hors ligne")}{(v.Paused ? ", en pause" : "")} · liste : {v.Playlist?.Name ?? "aucune"}{lk}{cal} · aire : {v.Area?.Name ?? "-"}{pars}\n");
             }
             if (i == 0) sb.Append("(aucun écran)\n");
@@ -158,6 +173,16 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
             if (n2 == 0) sb.Append("(aucune image)\n");
             sb.Append(web ? $"Images d'internet : disponibles (photos neutres de {WebImages.Provider}, ajoutées à la médiathèque)\n" : "Images d'internet : non disponibles\n");
 
+            sb.Append("\nListes interactives (bornes tactiles ; pages et nombre d'éléments) :\n");
+            foreach (var l in shownIl)
+            {
+                var key = ilKey[l.Id]; ilists[key] = l.Id; names[l.Id] = l.Name;
+                var bornes = InteractiveLists.UsedBy(d.AllScreens, l.Id).Count;
+                var right = ilRights.GetValueOrDefault(l.Id) < FolderRight.Write ? " · lecture seule (à dupliquer pour la modifier)" : "";
+                sb.Append($"{key} · {l.Name}{(IOpen(l) ? " (ouverte)" : "")} · {(InteractiveLists.Portrait(l.Orientation) ? "portrait" : "paysage")} · {l.Pages.Count} page(s) : {string.Join(", ", l.Pages.Take(8).Select(p => $"{p.Name} ({p.Els.Count})"))} · {bornes} borne(s){right}\n");
+            }
+            if (shownIl.Count == 0) sb.Append("(aucune liste interactive)\n");
+
             sb.Append("\nCalendriers de programmation :\n");
             var q = 0;
             foreach (var c in shownCals)
@@ -172,7 +197,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
 
             sb.Append($"\nAlerte « écran hors ligne » après {t.AlertOfflineMinutes} minute(s).\n");
             if (past.Count > 0) sb.Append("\nHistorique récent :\n" + string.Join("\n", past.Select(e => $"{e.AtUtc.ToLocalTime():dd.MM HH:mm} · {e.Title}{(e.Actor is { Length: > 0 } a ? " (" + a + ")" : "")}")) + "\n");
-            return new Ctx(screens, lists, items, comps, media, cals, names, sb.ToString(), web);
+            return new Ctx(screens, lists, items, comps, media, cals, names, sb.ToString(), web, ilists);
         });
     }
 
@@ -252,6 +277,7 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         if (c.Comps.Count > 0) parts.Add(N(c.Comps.Count, "composition", "compositions"));
         if (c.Media.Count > 0) parts.Add(N(c.Media.Count, "image", "images"));
         if (c.Cals.Count > 0) parts.Add(N(c.Cals.Count, "calendrier", "calendriers"));
+        if (c.ILists.Count > 0) parts.Add(N(c.ILists.Count, "liste interactive", "listes interactives"));
         return string.Join(", ", parts);
     }
 
@@ -298,13 +324,16 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         "composition_create" => "Créer une composition", "web_image" => "Chercher une photo sur internet", "text_replace" => "Remplacer un texte", "text_fix" => "Corriger des textes",
         "calendar_create" => "Créer un calendrier", "calendar_event" => "Ajouter un créneau au calendrier", "calendar_assign" => "Assigner un calendrier",
         "alert_delay" => "Régler l'alerte hors ligne",
+        "composition_edit" => "Modifier une composition", "composition_rename" => "Renommer une composition", "composition_duplicate" => "Dupliquer une composition",
+        "ilist_create" => "Créer une liste interactive", "ilist_edit" => "Modifier une liste interactive", "ilist_rename" => "Renommer une liste interactive",
+        "ilist_duplicate" => "Dupliquer une liste interactive", "kiosk_set_ilist" => "Choisir la liste interactive d'une borne",
         _ => null,
     };
 
     /// <summary>Ce qu'on dit d'une action longue pendant qu'elle tourne (elle interroge l'IA ou internet) ; null pour une action rapide.</summary>
     public static string? SlowHint(string op) => op switch
     {
-        "composition_create" or "text_fix" or "media_analyze" or "list_review" => "l'IA travaille, cela peut prendre jusqu'à une minute",
+        "composition_create" or "composition_edit" or "ilist_create" or "ilist_edit" or "text_fix" or "media_analyze" or "list_review" => "l'IA travaille, cela peut prendre jusqu'à une minute",
         "web_image" => "recherche sur internet, quelques secondes",
         _ => null,
     };
@@ -314,10 +343,11 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         if (string.IsNullOrEmpty(open)) return (null, null);
         if (ctx.Lists.TryGetValue(open, out var l)) return ("/playlists/" + l, "Ouvrir la liste « " + ctx.Names[l] + " »");
         if (ctx.Comps.TryGetValue(open, out var c)) return ("/compositions/" + c, "Ouvrir la composition « " + ctx.Names[c] + " »");
+        if (ctx.ILists.TryGetValue(open, out var t)) return ("/interactive/" + t, "Ouvrir la liste interactive « " + ctx.Names[t] + " »");
         if (ctx.Screens.ContainsKey(open)) return ("/", "Ouvrir la page Écrans");
         return open switch
         {
-            "media" => ("/media", "Ouvrir la médiathèque"), "screens" => ("/", "Ouvrir la page Écrans"), "playlists" => ("/playlists", "Ouvrir les listes de diffusion"),
+            "media" => ("/media", "Ouvrir la médiathèque"), "screens" => ("/", "Ouvrir la page Écrans"), "playlists" => ("/playlists", "Ouvrir les listes de diffusion"), "interactive" => ("/interactive-lists", "Ouvrir les listes interactives"),
             "programmations" => ("/programmations", "Ouvrir les programmations"), "settings" => ("/settings", "Ouvrir les réglages"), _ => (null, null),
         };
     }
@@ -345,10 +375,10 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
         Guid New(Dictionary<string, Guid> map, string name)
         {
             var g = Guid.NewGuid();
-            bool Free(string k) => !c.Screens.ContainsKey(k) && !c.Lists.ContainsKey(k) && !c.Comps.ContainsKey(k) && !c.Media.ContainsKey(k) && !c.Cals.ContainsKey(k);
+            bool Free(string k) => !c.Screens.ContainsKey(k) && !c.Lists.ContainsKey(k) && !c.Comps.ContainsKey(k) && !c.Media.ContainsKey(k) && !c.Cals.ContainsKey(k) && !c.ILists.ContainsKey(k);
             void Take(string k) { map[k] = g; if (map == c.Lists) c.Items[k] = new(); }
             if (Str(x, "ref") is { Length: > 0 and <= 12 } r && Free(r)) Take(r);
-            var prefix = map == c.Lists ? "L" : map == c.Comps ? "C" : "K";
+            var prefix = map == c.Lists ? "L" : map == c.Comps ? "C" : map == c.ILists ? "T" : "K";
             var n = 1;
             while (!Free(prefix + n)) n++;
             Take(prefix + n);
@@ -591,6 +621,40 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 foreach (var s in Screens()) yield return Act($"Assigner le calendrier « {N(cal)} » à {N(s)} (s'applique tout de suite)", ("s", s.ToString()), ("k", cal.ToString()));
                 break;
             }
+            case "ilist_create":
+            {
+                var name = Cut(Str(x, "name"), 80); var sentence = Cut(Str(x, "sentence") ?? Str(x, "change"), AiInteractive.MaxChange);
+                if (name.Length == 0 || sentence.Length < 4) yield break;
+                var portrait = x["portrait"] is not JsonValue v || !v.TryGetValue<bool>(out var pb) || pb;   // rien dit : portrait, le format habituel d'une borne
+                yield return Act($"Créer la liste interactive « {name} » ({(portrait ? "portrait" : "paysage")}) : {Cut(sentence, 140)}",
+                    ("name", name), ("sentence", sentence), ("portrait", portrait.ToString()), ("id", New(c.ILists, name).ToString()));
+                break;
+            }
+            case "ilist_edit":
+            {
+                var change = Cut(Str(x, "change") ?? Str(x, "sentence"), AiInteractive.MaxChange);
+                if (Ref("ilist", c.ILists) is { } il && change.Length >= 3) yield return Act($"Modifier la liste interactive « {N(il)} » : {Cut(change, 140)}", ("t", il.ToString()), ("change", change));
+                break;
+            }
+            case "ilist_rename":
+            {
+                var name = Cut(Str(x, "name"), 80);
+                if (Ref("ilist", c.ILists) is { } il && name.Length > 0) yield return Act($"Renommer la liste interactive « {N(il)} » en « {name} »", ("t", il.ToString()), ("name", name));
+                break;
+            }
+            case "ilist_duplicate":
+            {
+                if (Ref("ilist", c.ILists) is not { } il) yield break;
+                var name = Cut(Str(x, "name"), 80) is { Length: > 0 } nm ? nm : Cut(N(il) + " (copie)", 80);
+                yield return Act($"Dupliquer la liste interactive « {N(il)} » sous le nom « {name} »", ("t", il.ToString()), ("name", name), ("id", New(c.ILists, name).ToString()));
+                break;
+            }
+            case "kiosk_set_ilist":
+            {
+                if (Ref("ilist", c.ILists) is not { } il) yield break;
+                foreach (var s in Screens()) yield return Act($"Mettre la liste interactive « {N(il)} » sur la borne {N(s)} (à publier ensuite)", ("s", s.ToString()), ("t", il.ToString()));
+                break;
+            }
             case "alert_delay":
             {
                 var min = int.Parse(Num("minutes", 10, 1, 60));
@@ -731,6 +795,45 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
                 case "composition_edit": return await ComposeEdit(a, ct);
                 case "composition_rename": return ComposeRename(a);
                 case "composition_duplicate": return ComposeDuplicate(a);
+                case "ilist_create": return await IListNew(a, ct);
+                case "ilist_edit": return await IListEdit(a, ct);
+                case "ilist_rename":
+                {
+                    if (!Can(LevelPages.Playlists)) return new(NoRight);
+                    var id = G(a, "t");
+                    var old = store.Read(d => d.InteractiveLists.FirstOrDefault(l => l.Id == id)?.Name);
+                    var err = store.Write(d => InteractiveListOps.Rename(d, id, a.A["name"]));
+                    if (err != null) return new(err);
+                    panel.InteractiveSaved(id);
+                    return new(null, "Liste interactive renommée.", () => { var e2 = store.Write(d => InteractiveListOps.Rename(d, id, old ?? "")); panel.InteractiveSaved(id); return Task.FromResult(e2); });
+                }
+                case "ilist_duplicate":
+                {
+                    if (!Can(LevelPages.Playlists)) return new(NoRight);
+                    var src = G(a, "t");
+                    var err = store.Write(d =>
+                    {
+                        if (d.InteractiveLists.FirstOrDefault(l => l.Id == src) is not { } l) return "Liste interactive introuvable.";
+                        var pre = Guid.TryParse(a.A.GetValueOrDefault("id"), out var pg) ? pg : Guid.Empty;
+                        if (pre != Guid.Empty && d.Root.InteractiveLists.Any(x => x.Id == pre)) return "Cette copie a déjà été créée.";
+                        InteractiveList copy;
+                        try { copy = InteractiveListOps.Copy(d, l); } catch (InvalidOperationException e) { return e.Message; }
+                        copy.Name = InteractiveLists.Cap(a.A["name"], 80);
+                        if (pre != Guid.Empty) copy.Id = pre;   // identifiant tiré d'avance : « NT1 » pour les actions suivantes
+                        return (string?)null;
+                    });
+                    if (err == null) panel.InteractiveSaved(src);
+                    return new(err, err == null ? "Liste interactive dupliquée : aucune borne ne l'affiche encore." : null);
+                }
+                case "kiosk_set_ilist":
+                {
+                    var sid = G(a, "s"); var tid = G(a, "t");
+                    var (isKiosk, same) = store.Read(d => d.AllScreens.FirstOrDefault(s => s.Id == sid) is { Kiosk: not null } s && d.InteractiveLists.FirstOrDefault(l => l.Id == tid) is { } l
+                        ? (true, InteractiveLists.Portrait(l.Orientation) == InteractiveLists.Portrait(s.Orientation)) : (false, true));
+                    if (!isKiosk) return new("Cet écran n'est pas une borne tactile, ou la liste interactive est introuvable (si elle devait être créée juste avant, confirmez aussi sa création).");
+                    return ScreenSet(a, (s, v) => { var old = s.Kiosk!.ListId?.ToString() ?? ""; s.Kiosk.ListId = Guid.TryParse(v, out var g) ? g : null; s.KioskRevision++; return old; }, tid.ToString(),
+                        "Liste interactive choisie : publiez la borne pour l'appliquer." + (same ? "" : " Attention : la liste et la borne n'ont pas le même format (portrait / paysage), elle serait déformée."));
+                }
                 case "calendar_create":
                 {
                     if (!Can(LevelPages.Screens)) return new(NoRight);
@@ -960,6 +1063,81 @@ public class AiAssistant(TenantStore store, AiService ai, AiMedia aiMedia, AiCom
             Guid.TryParse(a.A.GetValueOrDefault("id"), out var pre) ? pre : null);
         if (item == null) return new(string.Join(" ", errors));
         return new(null, $"Copie « {item.Name} » créée.");
+    }
+
+    // ---------- Listes interactives des bornes : création et modification par l'IA ----------
+
+    private string Origin() { try { return nav.BaseUri; } catch (InvalidOperationException) { return ""; } }
+
+    private static string Loose(int n) => n == 0 ? "" : n == 1 ? " 1 tuile reste sans action : sa cible n'a pas été trouvée." : $" {n} tuiles restent sans action : leur cible n'a pas été trouvée.";
+
+    /// <summary>Crée une liste interactive entière depuis une description ; elle appartient à la personne, à la racine de ses listes.</summary>
+    private async Task<AiRun> IListNew(AiAction a, CancellationToken ct)
+    {
+        if (!Can(LevelPages.Playlists)) return new(NoRight);
+        var id = Guid.TryParse(a.A.GetValueOrDefault("id"), out var pre) ? pre : Guid.NewGuid();   // identifiant tiré d'avance : « NT1 » pour les actions suivantes
+        var full = $"Au plus {InteractiveLists.MaxLists} listes interactives.";
+        var (cat, state) = store.Read(d => (AiInteractive.Catalog(d, null, a.A["name"] + " " + a.A["sentence"]),
+            d.Root.InteractiveLists.Any(x => x.Id == id) ? "Cette liste interactive a déjà été créée." : d.InteractiveLists.Count >= InteractiveLists.MaxLists ? full : null));
+        if (state != null) return new(state);
+        var r = await interactive.Create(store.ClientId, a.A["name"], a.A["sentence"], a.A["portrait"] == "True", cat, ct);
+        if (!r.Ok) return new(r.Message);
+        var origin = Origin();
+        var err = store.Write(d =>
+        {
+            if (d.Root.InteractiveLists.Any(x => x.Id == id)) return "Cette liste interactive a déjà été créée.";
+            if (d.InteractiveLists.Count >= InteractiveLists.MaxLists) return full;
+            var l = new InteractiveList { Id = id };
+            if (InteractiveLists.Apply(l, r.Name, r.Doc, mid => d.Media.FirstOrDefault(m => m.Id == mid && m.Status == null), d.Tenant.IsGrowth, origin) is { } e) return e;
+            d.InteractiveLists.Add(l);
+            return null;
+        });
+        if (err != null) return new(err);
+        panel.InteractiveSaved(id);   // la page des listes interactives montre la nouvelle liste
+        return new(null, r.Summary + Loose(r.Loose) + " Aucune borne ne l'affiche encore.");
+    }
+
+    /// <summary>
+    /// Modifie une liste interactive selon la demande (tout ce que sait faire son éditeur), avec les droits de la personne : une liste en lecture seule est refusée.
+    /// Le document passe par le même contrôle que l'éditeur ; les bornes qui l'affichent ont alors des modifications à publier. « Annuler » remet l'ancienne liste.
+    /// </summary>
+    private async Task<AiRun> IListEdit(AiAction a, CancellationToken ct)
+    {
+        if (!Can(LevelPages.Playlists)) return new(NoRight);
+        var id = G(a, "t");
+        var (copy, cat, can) = store.Read(d => d.InteractiveLists.FirstOrDefault(l => l.Id == id) is { } l
+            ? (JsonSerializer.Deserialize<InteractiveList>(JsonSerializer.Serialize(l)), AiInteractive.Catalog(d, l, a.A["change"]), InteractiveListOps.CanEdit(d, l))
+            : ((InteractiveList?)null, (IListCatalog?)null, false));
+        if (copy == null || cat == null) return new("Liste interactive introuvable (si elle devait être créée juste avant, confirmez aussi sa création).");
+        if (!can) return new("Cette liste interactive est en lecture seule : dupliquez-la pour la modifier.");
+        var r = await interactive.Edit(store.ClientId, copy, a.A["change"], cat, ct);
+        if (!r.Ok) return new(r.Message);
+        var origin = Origin();
+        var (err, bornes) = store.Write(d =>
+        {
+            if (d.InteractiveLists.FirstOrDefault(l => l.Id == id) is not { } l) return ("Cette liste interactive a été supprimée.", 0);
+            if (!InteractiveListOps.CanEdit(d, l)) return ("Cette liste interactive est en lecture seule : dupliquez-la pour la modifier.", 0);
+            if (l.Revision != copy.Revision) return ("La liste interactive a changé pendant que l'IA travaillait : rien n'a été modifié. Redemandez.", 0);
+            if (InteractiveLists.Apply(l, r.Name, r.Doc, mid => d.Media.FirstOrDefault(m => m.Id == mid && m.Status == null), d.Tenant.IsGrowth, origin) is { } e) return (e, 0);
+            var mine = d.Root.Screens.Where(s => s.ClientId == d.ClientId).ToList();
+            InteractiveLists.Touch(mine, l.Id);
+            return ((string?)null, InteractiveLists.UsedBy(mine, l.Id).Count);
+        });
+        if (err != null) return new(err);
+        panel.InteractiveSaved(id);
+        var info = r.Summary + Loose(r.Loose) + (r.Name != copy.Name ? $" Nouveau nom : « {r.Name} »." : "") + (bornes > 0 ? $" Publiez {(bornes == 1 ? "la borne qui l'affiche" : $"les {bornes} bornes qui l'affichent")} pour l'appliquer." : "");
+        return new(null, info, () =>
+        {
+            var e2 = store.Write(d =>
+            {
+                if (d.InteractiveLists.FirstOrDefault(l => l.Id == id) is not { } l || !InteractiveListOps.CanEdit(d, l)) return "Liste interactive introuvable.";
+                l.Name = copy.Name; l.Orientation = copy.Orientation; l.Pages = copy.Pages; l.Revision++; l.UpdatedUtc = DateTime.UtcNow;
+                InteractiveLists.Touch(d.Root.Screens.Where(s => s.ClientId == d.ClientId), l.Id);
+                return (string?)null;
+            });
+            panel.InteractiveSaved(id);
+            return Task.FromResult(e2);
+        });
     }
 
     private AiRun TextReplace(AiAction a)

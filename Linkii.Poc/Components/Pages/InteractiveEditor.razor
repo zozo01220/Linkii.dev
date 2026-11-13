@@ -7,6 +7,7 @@
 @inject MediaLibrary Library
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject AssistantPanel Panel
 
 @* Éditeur de liste interactive (§168) : l'interface est en JS (wwwroot/ilist-editor.js, plein écran), le serveur garde la liste, range et contrôle le document.
    « /interactive/new » : rien n'est créé tant qu'on n'a pas enregistré. *@
@@ -57,6 +58,7 @@ else
         if (!firstRender || !ready || list == null) return;
         canWrite = Store.Read(d => d.Access.CanWrite(LevelPages.Playlists));
         self = DotNetObjectReference.Create(this);
+        Panel.InteractiveChanged += OnAssistantSaved;
         await JS.InvokeVoidAsync("LinkiiIListEditor.mount", root, new
         {
             id = Id?.ToString(),
@@ -111,8 +113,22 @@ else
     [JSInvokable]
     public void Leave() => Nav.NavigateTo(Back);
 
+    /// <summary>L'assistant a modifié la liste ouverte : l'éditeur la recharge (il demande avant de remplacer des modifications non enregistrées).</summary>
+    private void OnAssistantSaved(Guid id)
+    {
+        if (id != (Id ?? createdId)) return;
+        _ = InvokeAsync(async () =>
+        {
+            var l = Store.Read(d => d.InteractiveLists.FirstOrDefault(x => x.Id == id));
+            if (l == null) return;
+            try { await JS.InvokeVoidAsync("LinkiiIListEditor.replaced", InteractiveLists.ToDoc(l), l.Name, Images(), Contents()); }
+            catch (JSException) { } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }
+        });
+    }
+
     public async ValueTask DisposeAsync()
     {
+        Panel.InteractiveChanged -= OnAssistantSaved;
         try { await JS.InvokeVoidAsync("LinkiiIListEditor.unmount"); }
         catch (JSDisconnectedException) { }
         catch (InvalidOperationException) { }

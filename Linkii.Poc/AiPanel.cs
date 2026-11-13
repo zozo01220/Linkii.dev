@@ -185,6 +185,10 @@ public sealed class AssistantPanel(JsonStore root, TenantContext ctx)
     public event Action<Guid>? CompositionChanged;
     public void CompositionSaved(Guid id) => CompositionChanged?.Invoke(id);
 
+    /// <summary>L'assistant a enregistré cette liste interactive : l'éditeur ouvert dessus recharge la liste.</summary>
+    public event Action<Guid>? InteractiveChanged;
+    public void InteractiveSaved(Guid id) => InteractiveChanged?.Invoke(id);
+
     /// <summary>Pose (ou met à jour) la carte d'une page et ouvre le panneau.</summary>
     public void Show(string key, string ask, string? from, RenderFragment card, Func<string> summary)
     {
