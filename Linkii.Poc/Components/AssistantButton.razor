@@ -1,0 +1,25 @@
+@inject AiService AiSvc
+@inject TenantStore AiStore
+@inject AssistantPanel Panel
+@implements IDisposable
+
+@* Bouton « Assistant » du menu latéral, sous le logo (§241, maquettes/menu-tout-lateral.html) : ouvre ou ferme le panneau ancré à droite.
+   IA allumée et plan Pro (sinon il invite à passer Pro) ; absent si l'IA est coupée. Ordinateur seulement (masqué par le CSS sur petit écran). *@
+@if (Shown)
+{
+    <button type="button" class="nav-ai @(Panel.IsOpen ? "on" : "")" data-tip="Assistant (Ctrl + J)" aria-pressed="@(Panel.IsOpen ? "true" : "false")" @onclick="() => Panel.Toggle()">
+        <Ico Name="spark" Size="18" /><span>Assistant</span>
+        @if (Panel.Busy && !Panel.IsOpen) { <i class="qb-dot" aria-label="Demande en cours"></i> }
+        @if (NeedsPro) { <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span> }
+        else { <kbd>Ctrl J</kbd> }
+    </button>
+}
+
+@code {
+    private bool Shown { get { try { return AiSvc.State(AiStore.ClientId, "assistant").Status != AiStatus.Off; } catch (Exception) { return false; } } }
+    private bool NeedsPro => AiSvc.State(AiStore.ClientId, "assistant").Status == AiStatus.NeedsPro;
+
+    protected override void OnInitialized() => Panel.Changed += OnPanel;
+    private void OnPanel() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Panel.Changed -= OnPanel;
+}

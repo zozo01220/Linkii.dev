@@ -31,6 +31,10 @@
             <button type="button" class="nav-fold" aria-label="Replier le menu" aria-expanded="true" data-tip="Déplier le menu"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg></button>
         </div>
 
+        @* Plus de barre du haut sur ordinateur (§241, maquettes/menu-tout-lateral.html) : l'Assistant sous le logo, les onglets des pages sous leur entrée,
+           Urgence, les accès rapides et le compte au pied du menu. La zone du milieu (nav-scroll) défile seule ; le pied (nav-foot) reste visible. *@
+        @if (Ctx.ClientId != null) { <AssistantButton /> }
+        <div class="nav-scroll">
         @if (Ctx.ClientId != null)
         {
             @* Menu en hubs : Écrans, Programmation (listes de lecture + planning), Contenus (médiathèque, compositions, widgets, applications), Statistiques.
@@ -46,12 +50,14 @@
                 <NavLink class="@HubClass(ProgTabs)" href="@ProgTabs[0].Path">
                     <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes de diffusion @MenuPill("playlists")
                 </NavLink>
+                @HubSub(ProgTabs)
             }
             @if (ContentTabs.Count > 0)
             {
                 <NavLink class="@HubClass(ContentTabs)" href="@ContentTabs[0].Path">
                     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Contenus @MenuPill(MenuBadges.MediaFam, MenuBadges.Compositions)
                 </NavLink>
+                @HubSub(ContentTabs)
             }
             @if (Ctx.ClientId != null && Sees(LevelPages.Planning) && Modes.Expert)
             {
@@ -120,6 +126,8 @@
                 <NavLink class="nav nav-min" href="organisation">
                     <Ico Name="team" Size="18" /> Organisation @MenuPill("members")
                 </NavLink>
+                @* onglets de la page (Membres / Aires), envoyés par la page : chaque page a sa section, deux sorties du même nom ne peuvent pas coexister le temps d'une navigation *@
+                @if (CurrentPath == "organisation") { <div class="nav-tabs"><SectionOutlet SectionName="menu-tabs-organisation" /></div> }
             }
             else if (Modes.Expert && Sees(LevelPages.Zones))
             {
@@ -141,6 +149,7 @@
             <NavLink class="nav nav-min" href="stats">
                 <svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /></svg> Statistiques
             </NavLink>
+            @if (CurrentPath == "stats") { <div class="nav-tabs"><SectionOutlet SectionName="menu-tabs-stats" /></div> }
         }
         @if (Ctx.ClientId != null && Modes.Expert && orgAdmin)
         {
@@ -148,8 +157,12 @@
             <NavLink class="nav nav-min" href="history">
                 <Ico Name="clock" Size="18" /> Historique
             </NavLink>
+            @if (CurrentPath == "history") { <div class="nav-tabs"><SectionOutlet SectionName="menu-tabs-history" /></div> }
         }
-        @if (Ctx.ClientId != null && Modes.Expert && !Ctx.IsImpersonating) { <div class="nav-sep nav-sep-foot" role="separator"></div> }
+        </div>
+        <div class="nav-foot">
+        @if (Ctx.ClientId != null && Modes.Expert && !Ctx.IsImpersonating) { <div class="nav-sep nav-sep-foot nav-legacy" role="separator"></div> }
+        @if (Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating) { <EmergencyButton /> }   @* application « Alerte d'urgence » installée : ligne rouge, ordinateur seulement *@
         @if (Ctx.ClientId != null && !Ctx.IsImpersonating)
         {
             @* Installer le player : panneau avec les installeurs Windows, Android et le player web. Sur ordinateur, le menu « Player » de la barre des accès rapides le remplace. *@
@@ -161,7 +174,18 @@
                 <span class="switch @(Modes.Expert ? "on" : "")"><span></span></span>
             </button>
         }
-        @* Compte : en bas du menu latéral sur petit écran ; sur ordinateur, l'avatar de la barre des accès rapides le remplace. *@
+        @* Ordinateur : accès rapides (Notifications, Aide, Player, Réglages) et compte. Masqués dans l'app et sur petit écran, qui gardent les entrées « nav-legacy ». *@
+        <QuickBar OrgName="@orgName" Email="@userEmail" Initials="@Initials" SiteUrl="@siteUrl" PlanLabel="@PlanLabel" Trial="@(trialEnd != null)"
+                  ShowPlayer="@(Ctx.ClientId != null && !Ctx.IsImpersonating && Modes.Expert)"
+                  ShowAccount="@(Ctx.ClientId == null || Ctx.IsClientMember && !Ctx.IsImpersonating)"
+                  ShowBilling="@(Ctx.ClientId != null && orgAdmin && Modes.Expert)"
+                  ShowOrganisation="@(Ctx.ClientId != null && orgAdmin && Modes.Expert)"
+                  ShowNotifications="@(Ctx.ClientId != null && (orgAdmin || approvalsMenu))"
+                  ShowGettingStarted="@(Ctx.ClientId != null && CanGetStarted)"
+                  ShowConnect="@(Ctx.ClientId != null && writable.Contains(LevelPages.Screens))"
+                  SettingsHref="@(Ctx.ClientId != null && orgAdmin ? "settings" : null)"
+                  SettingsBadge="@(Pill("settings"))" />
+        @* Compte : en bas du menu latéral sur petit écran ; sur ordinateur, la ligne du compte ci-dessus le remplace. *@
         <div class="user side-user nav-legacy" @onclick:stopPropagation="true">
             <button type="button" class="user-btn" @onclick="() => open = !open" aria-haspopup="true" aria-expanded="@(open ? "true" : "false")">
                 <span class="avatar">@Initials</span>
@@ -187,6 +211,7 @@
         {
             <div class="powered">Propulsé par Linkivi</div>
         }
+        </div>
     </aside>
 
     <div class="main-col">
@@ -234,31 +259,6 @@
             }
             @if (AdminSpace) { <span class="app-space">@(Ctx.IsPlatformAdmin ? "Admin" : "Revendeur")</span> }
         </header>
-        @* Ordinateur : barre des accès rapides (Player, Store, Aide, Réglages, compte). Masquée dans l'app et sur petit écran, où la barre ci-dessus reste. *@
-        <QuickBar OrgName="@orgName" Email="@userEmail" Initials="@Initials" SiteUrl="@siteUrl" PlanLabel="@PlanLabel" Trial="@(trialEnd != null)"
-                  ShowPlayer="@(Ctx.ClientId != null && !Ctx.IsImpersonating && Modes.Expert)"
-                  ShowAccount="@(Ctx.ClientId == null || Ctx.IsClientMember && !Ctx.IsImpersonating)"
-                  ShowBilling="@(Ctx.ClientId != null && orgAdmin && Modes.Expert)"
-                  ShowOrganisation="@(Ctx.ClientId != null && orgAdmin && Modes.Expert)"
-                  ShowNotifications="@(Ctx.ClientId != null && (orgAdmin || approvalsMenu))"
-                  ShowEmergency="@(Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating)"
-                  ShowGettingStarted="@(Ctx.ClientId != null && CanGetStarted)"
-                  ShowConnect="@(Ctx.ClientId != null && writable.Contains(LevelPages.Screens))"
-                  SettingsHref="@(Ctx.ClientId != null && orgAdmin ? "settings" : null)"
-                  SettingsBadge="@(Pill("settings"))">
-            <Tabs>
-                @* Pages du hub : à gauche de la barre sur ordinateur (§237) ; l'app et les petits écrans gardent les onglets au-dessus du contenu. *@
-                @if (CurrentHub is { } qhub)
-                {
-                    @foreach (var t in qhub)
-                    {
-                        <NavLink class="hub-tab" href="@t.Path">@t.Label @if (t.Fam != null) { @Pill(t.Fam) }</NavLink>
-                    }
-                }
-                @* Onglets propres à une page (Organisation, Statistiques, Historique) : la page les envoie ici avec <SectionContent SectionName="qbar-tabs"> (§239). *@
-                <SectionOutlet SectionName="qbar-tabs" />
-            </Tabs>
-        </QuickBar>
         @if (Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating) { <EmergencyDock /> }   @* alerte d'urgence : bandeau rouge et bouton flottant du mobile (application installée) *@
         @{ var roDomain = ReadOnlyDomain; }
         @if (readOnly) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Vous êtes en <b>lecture seule</b> : vous voyez tout ce que possède l'organisation, sans rien modifier ni publier.</span></div> }
@@ -501,7 +501,23 @@
         var shut = intOpen == false;
         if (Ctx.UserId is { } uid && !Ctx.IsImpersonating) Root.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == uid) is { } u) u.AppsMenuShut = shut; });
     }
-    private string HubClass(List<HubTab> tabs) => InHub(tabs) ? "nav active" : "nav";
+    /// <summary>Pages d'un hub, sous son entrée du menu (§241) : affichées dès qu'on est dans le hub et qu'il a au moins deux pages. Sans nombres (§178).</summary>
+    private RenderFragment HubSub(List<HubTab> tabs) => builder =>
+    {
+        if (tabs.Count < 2 || !InHub(tabs)) return;
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "nav-tabs");
+        foreach (var t in tabs)
+        {
+            builder.OpenComponent<NavLink>(2);
+            builder.SetKey(t.Path);
+            builder.AddAttribute(3, "class", "hub-tab");
+            builder.AddAttribute(4, "href", t.Path);
+            builder.AddAttribute(5, "ChildContent", (RenderFragment)(b => b.AddContent(0, t.Label)));
+            builder.CloseComponent();
+        }
+        builder.CloseElement();
+    };    private string HubClass(List<HubTab> tabs) => InHub(tabs) ? "nav active" : "nav";
     private bool InHub(List<HubTab> tabs) => tabs.Any(t => t.Path == CurrentPath.Split('/')[0]);
     // Onglets à afficher : seulement sur la page d'un onglet elle-même (pas dans un éditeur) et si le hub a au moins deux pages.
     private List<HubTab>? CurrentHub => Ctx.ClientId == null ? null
