@@ -22,10 +22,13 @@
     if (e.key === '/' && !typing(d.activeElement) && !e.ctrlKey && !e.metaKey && !e.altKey) {
       var s = d.querySelector('[data-lx-search]');
       if (s) { e.preventDefault(); s.focus(); s.select(); }
-    } else if (e.key === 'Escape' && !modalOpen()) {
+    } else if (e.key === 'Escape' && !modalOpen() && !(d.activeElement && d.activeElement.classList.contains('mpv-ni'))) {
       current.ref.invokeMethodAsync('Escape');
-    } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && d.querySelector('.lx-drawer') && !typing(d.activeElement) && !modalOpen()) {
-      e.preventDefault();   // aperçu ouvert : média précédent / suivant
+    } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && d.querySelector('.lx-drawer, .mpv') && !typing(d.activeElement) && !modalOpen()) {
+      e.preventDefault();
+      var deck = d.querySelector('.mpv-deck');   // présentation ouverte : les flèches tournent les pages
+      if (deck) { var pb = deck.querySelector(e.key === 'ArrowLeft' ? '.nav.l' : '.nav.r'); if (pb && !pb.disabled) pb.click(); return; }
+      // aperçu ouvert : média précédent / suivant
       current.ref.invokeMethodAsync('StepFromKey',e.key === 'ArrowLeft' ? -1 : 1);
     }
   }
@@ -62,8 +65,19 @@
       var r = el.getBoundingClientRect(), h = w.innerHeight || d.documentElement.clientHeight;
       if (r.top < 70 || r.bottom > h - 20) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     },
+    // plein écran d'un élément (la scène de l'aperçu d'un média : image, outils et vignettes restent visibles)
+    fullscreen: function (id) {
+      var el = d.getElementById(id);
+      if (!el) return;
+      if (d.fullscreenElement) d.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen();
+    },
     detach: function (ref) { if (current && current.ref === ref) current = null; }
   };
+  // plein écran : au clic même (le navigateur l'exige dans le geste de l'utilisateur, pas après un aller-retour avec le serveur)
+  d.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('[data-fs]');
+    if (b) w.linkiiLibrary.fullscreen(b.getAttribute('data-fs'));
+  });
   d.addEventListener('keydown', onKey);
   d.addEventListener('dragenter', onEnter, true);
   d.addEventListener('dragleave', onLeave, true);

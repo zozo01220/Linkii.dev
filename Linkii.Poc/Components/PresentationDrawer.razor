@@ -4,113 +4,246 @@
 @inject Notifier Notify
 @inject TenantStore Store
 @inject Toaster Toast
+@inject IJSRuntime JS
+@using Microsoft.JSInterop
+@implements IDisposable
 
-@* Tiroir d'une présentation de la médiathèque (§103, maquette mediatheque-presentations-uniques.html) : informations (diapositives, modifié le, converti le,
-   fichier, utilisation), diapositives dont on peut sortir une en image ordinaire, contenus qui l'utilisent ; en bas, mettre à jour et supprimer
-   (inactif tant qu'un contenu l'utilise). *@
-<div class="lx-drawer-veil" @onclick="OnClose"></div>
-<aside class="lx-drawer pr-drawer" role="dialog" aria-modal="false" aria-labelledby="prd-title">
-    <div class="pr-dh">
+@* Aperçu d'une présentation de la médiathèque : la même grande fenêtre que celle d'un média (MediaPreviewPanel), pour un diaporama (§103).
+   Les flèches tournent les pages, les miniatures du bas sont les pages, ▶ les fait défiler, ‹ n / N › dans l'en-tête passe à la présentation voisine.
+   « En image » sort la page affichée en image ordinaire ; la colonne d'informations (masquée au départ) garde mise à jour, utilisation et rangement. *@
+<div class="lx-drawer-veil mpv-veil" @onclick="OnClose"></div>
+<div class="mpv mpv-deck @(info ? "" : "noinfo")" role="dialog" aria-modal="false" aria-labelledby="prd-title">
+    <div class="modal-head">
         <span class="pr-lg @Src">@Letter</span>
-        <div class="pr-ti">
-            <h3 id="prd-title" title="@Item.Name">@Item.Name</h3>
-            <small>@SourceName@(Path.Length > 0 ? " · " + Path : "")</small>
-        </div>
-        <button type="button" class="kebab-btn" title="Fermer (Échap)" aria-label="Fermer" @onclick="OnClose"><Ico Name="x" Size="18" /></button>
-    </div>
-    <div class="db">
-        <div class="pr-sec">Informations</div>
-        <div class="pr-kv"><span>@(Src is "ppt" or "gslides" ? "Diapositives" : "Pages")</span><b>@Pages@(Pages > shown.Count ? $" ({shown.Count} affichées)" : "")</b></div>
-        @if (Modified is { } mod) { <div class="pr-kv"><span>Modifié le</span><b>@Fmt(mod)</b></div> }
-        @if (Synced is { } syn)
-        {
-            <div class="pr-kv"><span>Converti le</span><b>@Fmt(syn)@if (stale) { <text> · <span class="pr-warn">modifié depuis</span></text> } else if (checkedOk) { <text> · à jour</text> }</b></div>
-        }
-        @if (Item.Info.GetValueOrDefault("file") is { Length: > 0 } file) { <div class="pr-kv"><span>Fichier</span><b title="@file">@file</b></div> }
-        <div class="pr-kv"><span>Utilisation</span><b>@UseSummary</b></div>
-
-        <div class="pr-sec">@(Src is "ppt" or "gslides" ? "Diapositives" : "Pages") <small>Cliquez pour en sortir une en image</small></div>
-        @if (shown.Count == 0) { <p class="hint">Aucune image disponible : mettez la présentation à jour.</p> }
-        else
-        {
-            <div class="pr-slides">
-                @foreach (var s in shown)
+        <div class="tt">
+            <div class="rn @(CanEdit && OnRenameTo.HasDelegate ? "" : "ro")">
+                @if (renaming)
                 {
-                    var pg = Pres.PageOf(s);
-                    <button type="button" class="pr-th @(selected == pg ? "on" : "")" aria-pressed="@(selected == pg ? "true" : "false")" aria-label="@Unit @pg" @onclick="() => selected = selected == pg ? null : pg">
-                        <img src="/media/@s.FileName?w=320" alt="" loading="lazy" decoding="async" />
-                        <span>@pg</span>
-                    </button>
+                    <input class="rn-in mpv-ni" @ref="renameInput" @bind="renameVal" @bind:event="oninput" maxlength="120" aria-label="Nom de la présentation"
+                           @onkeydown="RenameKey" @onblur="CommitRename" />
+                }
+                else
+                {
+                    <h3 id="prd-title" title="@(CanEdit && OnRenameTo.HasDelegate ? "Cliquer pour renommer" : Item.Name)" @onclick="StartRename">@Item.Name</h3>
+                    @if (CanEdit && OnRenameTo.HasDelegate) { <button type="button" class="le-ren" title="Renommer" aria-label="Renommer la présentation" @onclick="StartRename"><Ico Name="edit" Size="16" /></button> }
                 }
             </div>
-            @if (selected is { } sel)
-            {
-                <div class="pr-bar">
-                    <span class="grow">@(Src is "ppt" or "gslides" ? "Diapositive" : "Page") @sel sélectionnée</span>
-                    @if (CanEdit) { <button type="button" class="btn sm" disabled="@busy" @onclick="() => ToImage(sel)">Convertir en image</button> }
-                </div>
-            }
-        }
-
-        <div class="pr-sec">Utilisée par (@(uses?.Contents.Count ?? 0))</div>
-        @if (uses == null || uses.Contents.Count == 0) { <p class="hint" style="margin:0">Aucun contenu ne l'utilise : elle reste dans la médiathèque jusqu'à sa suppression.</p> }
-        else
-        {
-            @foreach (var c in uses.Contents)
-            {
-                <a class="pr-use" href="/apps/instance/@c.Id">
-                    <i class="lx-dot"></i><span class="grow">@c.Name</span>
-                    <small>@(c.Lists == 0 ? "dans aucune liste" : Count(c.Lists, "liste", "listes"))@(c.Screens > 0 ? " · " + Count(c.Screens, "écran", "écrans") : "")</small>
-                </a>
-            }
-        }
-        @if (error != null) { <div class="err" style="margin-top:12px">@error</div> }
-    </div>
-    @if (busy)
-    {
-        @* mise à jour en cours : ce qui se passe (lecture, conversion par Microsoft ou Google, page n sur N) et une barre d'avancement *@
-        <div class="pr-prog" role="status" aria-live="polite">
-            <span class="spinner"></span>
-            <div class="grow">
-                <b>Mise à jour en cours…</b>
-                <small>@(status.Length > 0 ? status : "Lecture du fichier…")</small>
-                <div class="pr-bar-track @(pct == null ? "indet" : "")"><i style="@(pct == null ? "" : $"width:{pct}%")"></i></div>
-            </div>
+            <small>@SourceName@(Pages > 0 ? " · " + Count(Pages, Unit.ToLowerInvariant(), Unit.ToLowerInvariant() + "s") : "")@(Path.Length > 0 ? " · " + Path : "")</small>
         </div>
-    }
-    <div class="df">
-        @if (CanRefresh) { <button type="button" class="btn sm" disabled="@busy" title="Convertir à nouveau la dernière version du fichier" @onclick="Refresh">@if (busy) { <span class="spinner"></span> } else { <Ico Name="refresh" Size="14" /> } Mettre à jour</button> }
-        <span class="grow"></span>
-        @if (OnShare.HasDelegate) { <button type="button" class="btn ghost sm" title="Partage la présentation entière, toutes ses images comprises" @onclick="OnShare"><Ico Name="share" Size="14" /> Partager…</button> }
+        @if (Position is { } pos)
+        {
+            <div class="hnav">
+                <button type="button" class="hp" title="Présentation précédente (Page préc.)" aria-label="Présentation précédente" disabled="@(!HasPrev)" @onclick="OnPrev"><span style="display:grid;transform:scaleX(-1)"><Ico Name="chevron-right" Size="16" /></span></button>
+                <span>@pos</span>
+                <button type="button" class="hn" title="Présentation suivante (Page suiv.)" aria-label="Présentation suivante" disabled="@(!HasNext)" @onclick="OnNext"><Ico Name="chevron-right" Size="16" /></button>
+            </div>
+        }
         @if (CanEdit)
         {
-            <button type="button" class="btn ghost sm icon" title="Renommer" aria-label="Renommer" @onclick="OnRename"><Ico Name="edit" Size="14" /></button>
-            @if (OnFolder.HasDelegate) { <button type="button" class="btn ghost sm" @onclick="OnFolder"><Ico Name="folder" Size="14" /> Ranger…</button> }
-            <button type="button" class="btn danger sm" disabled="@InUse" title="@(InUse ? "Utilisée : retirez-la d'abord des contenus" : "Supprimer la présentation et ses images")" @onclick="OnDelete"><Ico Name="trash" Size="14" /> Supprimer</button>
+            <button type="button" class="modal-x hbtn dgr" disabled="@InUse" title="@(InUse ? "Utilisée : retirez-la d'abord des contenus" : "Supprimer…")" aria-label="Supprimer la présentation" @onclick="OnDelete"><Ico Name="trash" Size="18" /></button>
         }
+        <button type="button" class="modal-x hbtn @(info ? "on" : "")" title="Informations" aria-label="Informations" aria-pressed="@(info ? "true" : "false")" @onclick="() => info = !info"><Ico Name="info" Size="18" /></button>
+        <button type="button" class="modal-x" title="Fermer (Échap)" aria-label="Fermer" @onclick="OnClose"><Ico Name="x" Size="18" /></button>
     </div>
-</aside>
+    <div class="mpv-body">
+        <div class="mpv-stage" id="mpv-stage">
+            <div class="mpv-viewwrap">
+                <div class="mpv-view">
+                    @if (Current is { FileName: not null } cur)
+                    {
+                        <img src="/media/@cur.FileName?w=1920&v=@cur.Rev" alt="@UnitCap @(sl + 1)" style="@MediaVars(cur)" @key="cur.Id" />
+                    }
+                    else { <span class="mpv-msg">Aucune image disponible : mettez la présentation à jour.</span> }
+                </div>
+                @if (shown.Count > 0) { <span class="mpv-count">@UnitCap @(sl + 1) / @shown.Count</span> }
+                @if (busy)
+                {
+                    <div class="mpv-prog" role="status" aria-live="polite">
+                        <span class="spinner"></span>
+                        <div class="grow">
+                            <b>Mise à jour en cours…</b>
+                            <small>@(status.Length > 0 ? status : "Lecture du fichier…")</small>
+                            <div class="pr-bar-track @(pct == null ? "indet" : "")"><i style="@(pct == null ? "" : $"width:{pct}%")"></i></div>
+                        </div>
+                    </div>
+                }
+                else if (error != null) { <div class="mpv-prog err">@error</div> }
+                <button type="button" class="im-btn nav l" title="@UnitCap précédente" aria-label="@UnitCap précédente" disabled="@(sl <= 0)" @onclick="() => Go(sl - 1)"><span style="display:grid;transform:scaleX(-1)"><Ico Name="chevron-right" Size="18" /></span></button>
+                <button type="button" class="im-btn nav r" title="@UnitCap suivante" aria-label="@UnitCap suivante" disabled="@(sl >= shown.Count - 1)" @onclick="() => Go(sl + 1)"><Ico Name="chevron-right" Size="18" /></button>
+                <div class="mpv-tools" role="toolbar" aria-label="Outils">
+                    @if (OnShare.HasDelegate)
+                    {
+                        <button type="button" class="shr" title="Partage la présentation entière, toutes ses images comprises" @onclick="OnShare"><Ico Name="share" Size="15" /> Partager</button>
+                        <span class="vs"></span>
+                    }
+                    <button type="button" title="Zoom arrière" aria-label="Zoom arrière" disabled="@(zoom == 0)" @onclick="() => zoom = Math.Max(0, zoom - 1)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M20 20l-4-4"/></svg></button>
+                    <span class="zl">@(zoom == 0 ? "Ajusté" : $"{(int)Math.Round(Zf[zoom] * 100)} %")</span>
+                    <button type="button" title="Zoom avant" aria-label="Zoom avant" disabled="@(zoom == 4)" @onclick="() => zoom = Math.Min(4, zoom + 1)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M11 8v6M20 20l-4-4"/></svg></button>
+                    <span class="vs"></span>
+                    <button type="button" class="@(playing ? "on" : "")" title="@(playing ? "Arrêter le défilement" : "Faire défiler les pages")" aria-label="Défilement automatique" aria-pressed="@(playing ? "true" : "false")" disabled="@(shown.Count < 2)" @onclick="TogglePlay"><Ico Name="@(playing ? "pause" : "play")" Size="16" /></button>
+                    @if (CanEdit && shown.Count > 0)
+                    {
+                        <button type="button" title="Sortir cette page en image ordinaire" aria-label="Convertir en image" disabled="@busy" @onclick="() => ToImage(sl + 1)"><Ico Name="image" Size="17" /></button>
+                    }
+                    <span class="vs"></span>
+                    <button type="button" title="Plein écran" aria-label="Plein écran" data-fs="mpv-stage"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+                </div>
+            </div>
+            @if (shown.Count > 1)
+            {
+                <div class="mpv-film" role="list" aria-label="Pages">
+                    @for (var k = 0; k < shown.Count; k++)
+                    {
+                        var i = k;
+                        <button type="button" role="listitem" class="mpv-fi @(i == sl ? "cur" : "")" title="@UnitCap @(i + 1)" aria-label="@UnitCap @(i + 1)" aria-current="@(i == sl ? "true" : "false")" @onclick="() => Go(i)">
+                            <img src="/media/@shown[i].FileName?w=320" alt="" loading="lazy" decoding="async" /><b>@(i + 1)</b>
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+
+        <aside class="mpv-side lx-im">
+            <div class="db">
+                <div class="tiles">
+                    <div><small>@(UnitCap + (Pages > 1 ? "s" : ""))</small><b>@Pages</b></div>
+                    <div><small>Format</small><b>@Format</b></div>
+                    <div><small>Source</small><b>@Letter</b></div>
+                </div>
+
+                <section class="im-sec">
+                    <h4><Ico Name="grid" Size="14" /> Utilisée par <span class="num">@(uses?.Contents.Count ?? 0)</span></h4>
+                    @if (uses == null || uses.Contents.Count == 0) { <p class="im-none">Aucun contenu ne l'utilise : elle reste dans la médiathèque jusqu'à sa suppression.</p> }
+                    else
+                    {
+                        @foreach (var c in uses.Contents)
+                        {
+                            <a class="pr-use" href="/apps/instance/@c.Id">
+                                <i class="lx-dot"></i><span class="grow">@c.Name</span>
+                                <small>@(c.Lists == 0 ? "dans aucune liste" : Count(c.Lists, "liste", "listes"))@(c.Screens > 0 ? " · " + Count(c.Screens, "écran", "écrans") : "")</small>
+                            </a>
+                        }
+                    }
+                </section>
+
+                <section class="im-sec">
+                    <h4><Ico Name="info" Size="14" /> Informations</h4>
+                    <div class="where">
+                        @if (Modified is { } mod) { <div><Ico Name="edit" Size="15" /><span>@Fmt(mod)<small>Modifié le</small></span></div> }
+                        @if (Synced is { } syn)
+                        {
+                            <div><Ico Name="refresh" Size="15" /><span>@Fmt(syn)@if (stale) { <text> · <span class="pr-warn">modifié depuis</span></text> } else if (checkedOk) { <text> · à jour</text> }<small>Converti le</small></span></div>
+                        }
+                        @if (Item.Info.GetValueOrDefault("file") is { Length: > 0 } file) { <div><Ico Name="file" Size="15" /><span>@file<small>Fichier</small></span></div> }
+                        <div><Ico Name="folder" Size="15" /><span>@(Path.Length > 0 ? Path : "Médiathèque")<small>Dossier</small></span></div>
+                        <div><Ico Name="play" Size="15" /><span>@UseSummary<small>Utilisation</small></span></div>
+                    </div>
+                    <p class="note"><Ico Name="info" Size="13" /> <span>Convertie en images au moment de l'import. Elle ne se met pas à jour toute seule : « Mettre à jour » relit la dernière version du fichier.</span></p>
+                </section>
+            </div>
+            @if (CanRefresh || (CanEdit && OnFolder.HasDelegate))
+            {
+                <div class="df">
+                    @if (CanRefresh) { <button type="button" class="btn sm" disabled="@busy" title="Convertir à nouveau la dernière version du fichier" @onclick="Refresh">@if (busy) { <span class="spinner"></span> } else { <Ico Name="refresh" Size="14" /> } Mettre à jour</button> }
+                    @if (CanEdit && OnFolder.HasDelegate) { <button type="button" class="btn ghost sm" @onclick="OnFolder"><Ico Name="folder" Size="14" /> Ranger…</button> }
+                </div>
+            }
+        </aside>
+    </div>
+</div>
 
 @code {
     [Parameter, EditorRequired] public MediaItem Item { get; set; } = default!;
     [Parameter] public string Path { get; set; } = "";
     [Parameter] public bool CanEdit { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
-    [Parameter] public EventCallback OnRename { get; set; }
+    /// <summary>Nouveau nom, saisi en cliquant sur le titre (comme une liste de lecture).</summary>
+    [Parameter] public EventCallback<string> OnRenameTo { get; set; }
     [Parameter] public EventCallback OnFolder { get; set; }
     /// <summary>Partager la présentation (avec toutes ses images) ; sans délégué, le bouton n'est pas proposé.</summary>
     [Parameter] public EventCallback OnShare { get; set; }
     [Parameter] public EventCallback OnDelete { get; set; }
     /// <summary>La présentation ou ses images ont changé : la page relit la médiathèque.</summary>
     [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>Les médias de la position ouverte, pour passer d'une présentation à sa voisine (‹ n / N › en haut).</summary>
+    [Parameter] public IReadOnlyList<MediaItem>? Siblings { get; set; }
+    [Parameter] public bool HasPrev { get; set; }
+    [Parameter] public bool HasNext { get; set; }
+    [Parameter] public EventCallback OnPrev { get; set; }
+    [Parameter] public EventCallback OnNext { get; set; }
 
     private PresentationUses? uses;
     private List<MediaItem> shown = new();
     private Guid loadedFor;
-    private int? selected;
     private bool busy, stale, checkedOk;
     private string status = "";
     private int? pct;   // avancement de la conversion des pages (null : étape sans pourcentage)
+
+    // ---------- Fenêtre : page affichée, défilement, zoom, nom modifiable ----------
+    private bool info;
+    private static readonly double[] Zf = { 1, 1.25, 1.5, 2, 3 };   // zoom : multiple de la taille ajustée à la fenêtre
+    private string MediaVars(MediaItem m) => System.FormattableString.Invariant($"--r:{(m.Width is > 0 && m.Height is > 0 ? (double)m.Width.Value / m.Height.Value : 16d / 9):0.####};--z:{Zf[zoom]}");
+    private int sl;          // page affichée (0 = la première)
+    private int zoom;        // 0 = ajustée ; 1 à 4 = 150 % à 300 %
+    private bool playing;
+    private System.Threading.Timer? timer;
+    private bool renaming, focusRename;
+    private string renameVal = "";
+    private ElementReference renameInput;
+
+    private MediaItem? Current => sl >= 0 && sl < shown.Count ? shown[sl] : null;
+
+    private string? Position
+    {
+        get
+        {
+            if (Siblings is not { Count: > 1 } l) return null;
+            var i = l.ToList().FindIndex(x => x.Id == Item.Id);
+            return i >= 0 ? $"{i + 1} / {l.Count}" : null;
+        }
+    }
+
+    private void Go(int to) { if (shown.Count == 0) return; sl = Math.Clamp(to, 0, shown.Count - 1); zoom = 0; }
+
+    private void TogglePlay()
+    {
+        if (playing) { StopPlay(); return; }
+        playing = true;
+        timer = new System.Threading.Timer(_ => _ = InvokeAsync(() => { if (shown.Count > 0) { sl = (sl + 1) % shown.Count; zoom = 0; } StateHasChanged(); }), null, 2500, 2500);
+    }
+
+    private void StopPlay() { playing = false; timer?.Dispose(); timer = null; }
+
+    public void Dispose() => timer?.Dispose();
+
+    private void StartRename()
+    {
+        if (!CanEdit || !OnRenameTo.HasDelegate || renaming) return;
+        renameVal = Item.Name; renaming = true; focusRename = true;
+    }
+
+    private void RenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") _ = CommitRename();
+        else if (e.Key == "Escape") renaming = false;
+    }
+
+    private async Task CommitRename()
+    {
+        if (!renaming) return;
+        renaming = false;
+        var n = renameVal.Trim();
+        if (n.Length > 0 && n != Item.Name) await OnRenameTo.InvokeAsync(n);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusRename && renaming)
+        {
+            focusRename = false;
+            try { await renameInput.FocusAsync(); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
+    }
 
     private void OnProgress(string s)
     {
@@ -123,8 +256,10 @@
 
     private string Src => Item.Info.GetValueOrDefault("src") ?? "pdf";
     private string Unit => Pres.Unit(Src);
+    private string UnitCap => Unit.Length > 0 ? char.ToUpperInvariant(Unit[0]) + Unit[1..] : Unit;
     private int Pages => Pres.Pages(Item) is > 0 and var n ? n : shown.Count;
     private bool InUse => uses is { Contents.Count: > 0 };
+    private string Format => Current is { Width: > 0 } c ? (c.Width >= c.Height ? "Paysage" : "Portrait") : "—";
     private string Letter => Src switch { "ppt" => "P", "gslides" => "S", "gdocs" => "D", "gsheets" => "X", "doc" => "W", "xls" => "X", "canva" => "C", _ => "PDF" };
     private string SourceName => Src switch { "ppt" => "PowerPoint · OneDrive", "gslides" => "Google Slides · Google Drive", "gdocs" => "Google Docs · Google Drive", "gsheets" => "Google Sheets · Google Drive", "doc" => "Word · OneDrive", "xls" => "Excel · OneDrive", "canva" => "Canva", _ => "Document PDF" };
 
@@ -154,7 +289,8 @@
     protected override async Task OnParametersSetAsync()
     {
         if (loadedFor == Item.Id) return;
-        loadedFor = Item.Id; selected = null; error = null; stale = false; checkedOk = false;
+        loadedFor = Item.Id; sl = 0; zoom = 0; renaming = false; error = null; stale = false; checkedOk = false;
+        StopPlay();
         Load();
         // le fichier a-t-il changé depuis la dernière conversion ? (une lecture, sans rien modifier)
         if (CloudKind is { } kind && CloudFileKind.RefOf(Item).Length > 0 && Modified != null)
@@ -172,6 +308,7 @@
     {
         uses = Library.PresentationUses(Item.Id);
         shown = Library.PresentationPages(Item.Id);
+        if (sl >= shown.Count) sl = Math.Max(0, shown.Count - 1);
     }
 
     private async Task ToImage(int page)

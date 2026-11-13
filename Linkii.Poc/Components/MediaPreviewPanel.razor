@@ -1,64 +1,151 @@
+@using Microsoft.JSInterop
 @inject MediaLibrary Library
 @inject AiService AiSvc
 @inject AiMedia AiMed
 @inject TenantStore Store
 
-@* Aperçu d'un média de la médiathèque : tiroir « immersif » (§51) — le média en grand avec ses flèches et sa croix posées dessus, son nom et ses
-   infos juste dessous, puis le partage (avec quelles aires, en lien vivant) et où il sert, enfin les actions. Ouvert par un clic sur la vignette ;
-   ← → passent au média voisin, Échap ferme (géré par la page). Un média partagé avec la personne n'offre que Télécharger et « Ne plus voir ». *@
-<div class="lx-drawer-veil" @onclick="OnClose"></div>
-<aside class="lx-drawer lx-im" role="dialog" aria-modal="false" aria-labelledby="mpp-title">
-    <div class="big">
-        @if (Item.Status == "processing") { <span>Conversion en MP4…</span> }
-        else if (Item.Status == "failed") { <span>@(Item.Error ?? "Import en échec")</span> }
-        else if (Item.FileName == null) { <Ico Name="image" Size="32" /> }
-        else if (Item.Type == "video") { <video src="/media/@Item.FileName" controls preload="metadata" @key="Item.Id"></video> }
-        else { <img src="/media/@Item.FileName?w=1280&v=@Item.Rev" alt="" @key="Item.Id" /> }
-        <span class="im-nav">
-            <button type="button" class="im-btn" title="Média précédent" aria-label="Média précédent" disabled="@(!HasPrev)" @onclick="OnPrev"><span style="display:grid;transform:scaleX(-1)"><Ico Name="chevron-right" Size="16" /></span></button>
-            <button type="button" class="im-btn" title="Média suivant" aria-label="Média suivant" disabled="@(!HasNext)" @onclick="OnNext"><Ico Name="chevron-right" Size="16" /></button>
-        </span>
-        <button type="button" class="im-btn im-x" title="Fermer (Échap)" aria-label="Fermer" @onclick="OnClose"><Ico Name="x" Size="16" /></button>
-    </div>
-    <div class="im-cap">
-        <b id="mpp-title" title="@Item.Name">@Item.Name</b>
-        <span>@(Item.Type == "video" ? "Vidéo" : "Image")@(Ext is { } e ? $" {e}" : "")@(Item.Width is > 0 ? $" · {Item.Width} × {Item.Height}" : "")@(Seconds is { } s ? $" · {Helpers.FormatDuration(s)}" : "")@(Item.Size is { } size ? $" · {Helpers.FormatSize(size)}" : "")</span>
-        <span>@Path@(Item.AddedUtc is { } added ? $" · importé le {added.ToLocalTime():dd.MM.yyyy à HH:mm}" : "")@(Source != null ? $" · {Source}" : "")</span>
-    </div>
-    <div class="db">
-        @if (SharedBy is { } by)
-        {
-            <section class="im-sec">
-                <h4><Ico Name="share" Size="14" /> Partagé par <small>lien vivant</small></h4>
-                <div class="im-per"><span class="im-av">@Initials(by)</span><span class="grow"><b>@by</b><small>@(CanEdit ? "vous pouvez le modifier" : "vous pouvez l'utiliser")</small></span></div>
-                <p class="note"><Ico Name="link" Size="13" /> Ce n'est pas une copie : c'est le média de @by. Vous l'utilisez dans vos listes@(CanEdit ? " et vous pouvez le modifier" : "") ; il ne se supprime que chez son propriétaire.</p>
-            </section>
-        }
-        else if (CanShare)
-        {
-            <section class="im-sec">
-                <h4><Ico Name="share" Size="14" /> Partagé avec <small>lien vivant</small></h4>
-                @if (!ShareSum.Any) { <p class="im-none">Pas partagé : vous seul le voyez.</p> }
-                @if (ShareSum.Everyone is { } all)
+@* Aperçu d'un média de la médiathèque : grande fenêtre centrée (maquette mediatheque-apercu-grand-fenetre.html). Le média en grand sur le fond sombre,
+   ses outils dans une pastille dessous (partager, zoom, pivoter, plein écran, télécharger), le fil des médias voisins tout en bas.
+   La colonne d'informations (utilisations, partage, description de l'IA, emplacement) est masquée au départ : le bouton ⓘ l'ouvre.
+   Le nom se modifie en cliquant dessus (comme une liste de lecture), la corbeille est en haut à côté de ⓘ.
+   ← → passent au média voisin, Échap ferme (gérés par la page). Un média partagé avec la personne n'offre que Télécharger et « Ne plus voir ». *@
+<div class="lx-drawer-veil mpv-veil" @onclick="OnClose"></div>
+<div class="mpv @(info ? "" : "noinfo")" role="dialog" aria-modal="false" aria-labelledby="mpp-title">
+    <div class="modal-head">
+        <div class="tt">
+            <div class="rn @(Editable && OnRenameTo.HasDelegate ? "" : "ro")">
+                @if (renaming)
                 {
-                    <div class="im-per"><span class="im-av"><Ico Name="users" Size="14" /></span><span class="grow"><b>Toute l'organisation</b></span><span class="pill @(all ? "ok" : "blue")">@(all ? "Peut modifier" : "Peut utiliser")</span></div>
+                    <input class="rn-in mpv-ni" @ref="renameInput" @bind="renameVal" @bind:event="oninput" maxlength="120" aria-label="Nom du média"
+                           @onkeydown="RenameKey" @onblur="CommitRename" />
                 }
-                @foreach (var sh in ShareSum.Names)
+                else
                 {
-                    <div class="im-per"><span class="im-av">@Initials(sh.Label)</span><span class="grow"><b>@sh.Label</b></span><span class="pill @(sh.Edit ? "ok" : "blue")">@(sh.Edit ? "Peut modifier" : "Peut utiliser")</span></div>
+                    <h3 id="mpp-title" title="@(Editable && OnRenameTo.HasDelegate ? "Cliquer pour renommer" : Item.Name)" @onclick="StartRename">@Item.Name</h3>
+                    @if (Editable && OnRenameTo.HasDelegate) { <button type="button" class="le-ren" title="Renommer" aria-label="Renommer le média" @onclick="StartRename"><Ico Name="edit" Size="16" /></button> }
                 }
-                <button type="button" class="im-add" @onclick="OnShare"><span class="im-av add"><Ico Name="plus" Size="13" /></span> @(ShareSum.Any ? "Modifier le partage" : "Partager avec…")</button>
-            </section>
+            </div>
+            <small>@(Item.Type == "video" ? "Vidéo" : "Image")@(Ext is { } e ? $" {e}" : "")@(Item.Width is > 0 ? $" · {Item.Width} × {Item.Height}" : "")@(Seconds is { } s ? $" · {Helpers.FormatDuration(s)}" : "")@(Item.Size is { } size ? $" · {Helpers.FormatSize(size)}" : "")</small>
+        </div>
+        @if (CanEdit && Drive == null && CanDelete)
+        {
+            <button type="button" class="modal-x hbtn dgr" title="Supprimer…" aria-label="Supprimer le média" @onclick="OnDelete"><Ico Name="trash" Size="18" /></button>
         }
+        <button type="button" class="modal-x hbtn @(info ? "on" : "")" title="Informations" aria-label="Informations" aria-pressed="@(info ? "true" : "false")" @onclick="() => info = !info"><Ico Name="info" Size="18" /></button>
+        <button type="button" class="modal-x" title="Fermer (Échap)" aria-label="Fermer" @onclick="OnClose"><Ico Name="x" Size="18" /></button>
+    </div>
+    <div class="mpv-body">
+        <div class="mpv-stage" id="mpv-stage">
+            <div class="mpv-viewwrap">
+                <div class="mpv-view">
+                    @if (Item.Status == "processing") { <span class="mpv-msg">Conversion en MP4…</span> }
+                    else if (Item.Status == "failed") { <span class="mpv-msg">@(Item.Error ?? "Import en échec")</span> }
+                    else if (Item.FileName == null) { <span class="mpv-msg"><Ico Name="image" Size="32" /></span> }
+                    else if (Item.Type == "video") { <video src="/media/@Item.FileName" controls preload="metadata" style="@MediaVars" @key="Item.Id"></video> }
+                    else { <img src="/media/@Item.FileName?w=1920&v=@Item.Rev" alt="@Item.Name" style="@MediaVars" @key="Item.Id" /> }
+                </div>
+                @if (Position is { } pos) { <span class="mpv-count">@pos</span> }
+                <button type="button" class="im-btn nav l" title="Média précédent" aria-label="Média précédent" disabled="@(!HasPrev)" @onclick="OnPrev"><span style="display:grid;transform:scaleX(-1)"><Ico Name="chevron-right" Size="18" /></span></button>
+                <button type="button" class="im-btn nav r" title="Média suivant" aria-label="Média suivant" disabled="@(!HasNext)" @onclick="OnNext"><Ico Name="chevron-right" Size="18" /></button>
+                <div class="mpv-tools" role="toolbar" aria-label="Outils">
+                    @if (CanShare && OnShare.HasDelegate)
+                    {
+                        <button type="button" class="shr" title="Partager" @onclick="OnShare"><Ico Name="share" Size="15" /> Partager</button>
+                        <span class="vs"></span>
+                    }
+                    @if (Item.Type == "image" && Item.FileName != null)
+                    {
+                        <button type="button" title="Zoom arrière" aria-label="Zoom arrière" disabled="@(zoom == 0)" @onclick="() => zoom = Math.Max(0, zoom - 1)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M20 20l-4-4"/></svg></button>
+                        <span class="zl">@(zoom == 0 ? "Ajusté" : $"{(int)Math.Round(Zf[zoom] * 100)} %")</span>
+                        <button type="button" title="Zoom avant" aria-label="Zoom avant" disabled="@(zoom == 4)" @onclick="() => zoom = Math.Min(4, zoom + 1)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M11 8v6M20 20l-4-4"/></svg></button>
+                        <span class="vs"></span>
+                    }
+                    @if (CanRotate && OnRotate.HasDelegate)
+                    {
+                        <button type="button" title="Pivoter à gauche" aria-label="Pivoter à gauche" @onclick="() => OnRotate.InvokeAsync(false)"><Ico Name="rotate-left" Size="17" /></button>
+                        <button type="button" title="Pivoter à droite" aria-label="Pivoter à droite" @onclick="() => OnRotate.InvokeAsync(true)"><Ico Name="rotate-right" Size="17" /></button>
+                        <span class="vs"></span>
+                    }
+                    <button type="button" title="Plein écran" aria-label="Plein écran" data-fs="mpv-stage"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+                    @if (Item.FileName != null) { <a class="tl" href="/media/@Item.FileName" download="@Item.Name" title="Télécharger" aria-label="Télécharger"><Ico Name="download" Size="17" /></a> }
+                </div>
+            </div>
+            @if (Siblings is { Count: > 1 } sibs)
+            {
+                <div class="mpv-film" role="list" aria-label="Médias voisins">
+                    @foreach (var sb in sibs)
+                    {
+                        var other = sb;
+                        <button type="button" role="listitem" class="mpv-fi @(other.Id == Item.Id ? "cur" : "")" title="@other.Name" aria-label="@other.Name" aria-current="@(other.Id == Item.Id ? "true" : "false")" @onclick="() => OnPick.InvokeAsync(other.Id)">
+                            @if (other.Status == null && other.FileName != null) { <MediaThumb Media="other" /> }
+                        </button>
+                    }
+                </div>
+            }
+        </div>
 
-        @if (Item.Credit is { Length: > 0 } credit)
-        {
-            @* image venue d'une banque d'images : crédit du photographe (licence Pexels : crédit apprécié, pas de revente telle quelle) *@
-            <section class="im-sec">
-                <h4><Ico Name="image" Size="14" /> Source</h4>
-                <p class="im-none" style="margin:0"><a href="@(Item.CreditUrl ?? WebImages.ProviderUrl)" target="_blank" rel="noopener">@credit</a> · usage libre, crédit apprécié</p>
-            </section>
-        }
+        <aside class="mpv-side lx-im">
+            <div class="db">
+                <div class="tiles">
+                    <div><small>Dimensions</small><b>@(Item.Width is > 0 ? $"{Item.Width} × {Item.Height}" : "—")</b></div>
+                    <div><small>Poids</small><b>@(Item.Size is { } sz ? Helpers.FormatSize(sz) : "—")</b></div>
+                    <div><small>@(Seconds != null ? "Durée" : "Type")</small><b>@(Seconds is { } sc ? Helpers.FormatDuration(sc) : (Ext ?? (Item.Type == "video" ? "Vidéo" : "Image")))</b></div>
+                </div>
+
+                <section class="im-sec">
+                    <h4><Ico Name="play" Size="14" /> Utilisé dans @if (uses != null && uses.Any) { <span class="num">@(uses.Lists.Count + uses.Contents.Count)</span> }</h4>
+                    @if (uses == null || !uses.Any)
+                    {
+                        <p class="im-none">Aucune liste de lecture ni aucun contenu ne l'utilise.</p>
+                    }
+                    else
+                    {
+                        <div class="im-chips">
+                            @foreach (var l in uses.Lists)
+                            {
+                                <a class="im-chip" href="/playlists/@l.Id" title="Liste de lecture · @(l.Count == 0 ? "sur aucun écran" : l.Count > 1 ? $"{l.Count} écrans" : "1 écran")"><Ico Name="play" Size="13" />@l.Name<small>@(l.Count == 0 ? "" : l.Count > 1 ? $"{l.Count} écrans" : "1 écran")</small></a>
+                            }
+                            @foreach (var c in uses.Contents)
+                            {
+                                <a class="im-chip" href="/apps/instance/@c.Id" title="Contenu · @(c.Count == 0 ? "dans aucune liste" : c.Count > 1 ? $"dans {c.Count} listes" : "dans 1 liste")"><Ico Name="grid" Size="13" />@c.Name<small>@(c.Count == 0 ? "" : c.Count > 1 ? $"{c.Count} listes" : "1 liste")</small></a>
+                            }
+                        </div>
+                    }
+                </section>
+
+                @if (SharedBy is { } by)
+                {
+                    <section class="im-sec">
+                        <h4><Ico Name="share" Size="14" /> Partagé par <small>lien vivant</small></h4>
+                        <div class="im-per"><span class="im-av">@Initials(by)</span><span class="grow"><b>@by</b><small>@(CanEdit ? "vous pouvez le modifier" : "vous pouvez l'utiliser")</small></span></div>
+                        <p class="note"><Ico Name="link" Size="13" /> <span>Ce n'est pas une copie : c'est le média de @by. Vous l'utilisez dans vos listes@(CanEdit ? " et vous pouvez le modifier" : "") ; il ne se supprime que chez son propriétaire.</span></p>
+                    </section>
+                }
+                else if (CanShare)
+                {
+                    <section class="im-sec">
+                        <h4><Ico Name="share" Size="14" /> Partagé avec <small>lien vivant</small></h4>
+                        @if (!ShareSum.Any) { <p class="im-none">Pas partagé : vous seul le voyez.</p> }
+                        @if (ShareSum.Everyone is { } all)
+                        {
+                            <div class="im-per"><span class="im-av"><Ico Name="users" Size="14" /></span><span class="grow"><b>Toute l'organisation</b></span><span class="pill @(all ? "ok" : "blue")">@(all ? "Peut modifier" : "Peut utiliser")</span></div>
+                        }
+                        @foreach (var sh in ShareSum.Names)
+                        {
+                            <div class="im-per"><span class="im-av">@Initials(sh.Label)</span><span class="grow"><b>@sh.Label</b></span><span class="pill @(sh.Edit ? "ok" : "blue")">@(sh.Edit ? "Peut modifier" : "Peut utiliser")</span></div>
+                        }
+                        <button type="button" class="im-add" @onclick="OnShare"><span class="im-av add"><Ico Name="plus" Size="13" /></span> @(ShareSum.Any ? "Modifier le partage" : "Partager avec…")</button>
+                    </section>
+                }
+
+                @if (Item.Credit is { Length: > 0 } credit)
+                {
+                    @* image venue d'une banque d'images : crédit du photographe (licence Pexels : crédit apprécié, pas de revente telle quelle) *@
+                    <section class="im-sec">
+                        <h4><Ico Name="image" Size="14" /> Source</h4>
+                        <p class="im-none" style="margin:0"><a href="@(Item.CreditUrl ?? WebImages.ProviderUrl)" target="_blank" rel="noopener">@credit</a> · usage libre, crédit apprécié</p>
+                    </section>
+                }
 
         @if (Item.Type == "image" && Item.AppId == null && Item.FileName != null && Item.Status == null && (Item.AiDone || aiState.Status != AiStatus.Off))
         {
@@ -114,47 +201,36 @@
             </section>
         }
 
-        <section class="im-sec">
-            <h4><Ico Name="play" Size="14" /> Utilisé dans @if (uses != null && uses.Any) { <small>@(uses.Lists.Count + uses.Contents.Count)</small> }</h4>
-            @if (uses == null || !uses.Any)
+                <section class="im-sec">
+                    <h4><Ico Name="folder" Size="14" /> Emplacement</h4>
+                    <div class="where">
+                        <div><Ico Name="folder" Size="15" /><span>@Path<small>Dossier</small></span></div>
+                        @if (Source != null) { <div><Ico Name="info" Size="15" /><span>@Source<small>Source</small></span></div> }
+                        @if (Item.AddedUtc is { } added) { <div><Ico Name="clock" Size="15" /><span>@($"{added.ToLocalTime():dd.MM.yyyy à HH:mm}")<small>Importé le</small></span></div> }
+                    </div>
+                </section>
+
+                @if (Drive != null) { <p class="note"><Ico Name="folder" Size="13" /> <span>@Drive. Renommez-le, déplacez-le ou retirez-le dans le Drive.</span></p> }
+                else if (!CanEdit && SharedBy == null) { <p class="note"><Ico Name="lock" Size="13" /> <span>Lecture seule : vous pouvez l'utiliser et le télécharger, pas le modifier.</span></p> }
+            </div>
+            @if ((CanEdit && Drive == null && (OnFolder.HasDelegate || OnArea.HasDelegate)) || (SharedBy != null && CanLeave))
             {
-                <p class="im-none">Aucune liste de lecture ni aucun contenu ne l'utilise.</p>
-            }
-            else
-            {
-                <div class="im-chips">
-                    @foreach (var l in uses.Lists)
+                <div class="df">
+                    @if (CanEdit && Drive == null)
                     {
-                        <a class="im-chip" href="/playlists/@l.Id" title="Liste de lecture · @(l.Count == 0 ? "sur aucun écran" : l.Count > 1 ? $"{l.Count} écrans" : "1 écran")"><Ico Name="play" Size="13" />@l.Name<small>@(l.Count == 0 ? "" : l.Count > 1 ? $"{l.Count} écrans" : "1 écran")</small></a>
+                        @if (OnFolder.HasDelegate) { <button class="btn ghost sm" @onclick="OnFolder"><Ico Name="folder" Size="14" /> Ranger…</button> }
+                        @if (OnArea.HasDelegate) { <button class="btn ghost sm" @onclick="OnArea"><Ico Name="move" Size="14" /> Autre aire…</button> }
                     }
-                    @foreach (var c in uses.Contents)
+                    @if (SharedBy != null && CanLeave)
                     {
-                        <a class="im-chip" href="/apps/instance/@c.Id" title="Contenu · @(c.Count == 0 ? "dans aucune liste" : c.Count > 1 ? $"dans {c.Count} listes" : "dans 1 liste")"><Ico Name="grid" Size="13" />@c.Name<small>@(c.Count == 0 ? "" : c.Count > 1 ? $"{c.Count} listes" : "1 liste")</small></a>
+                        <span class="grow"></span>
+                        <button class="btn danger sm" title="Ce média disparaît de votre médiathèque" @onclick="OnLeave"><Ico Name="eye-off" Size="14" /> Ne plus voir</button>
                     }
                 </div>
             }
-        </section>
-        @if (Drive != null) { <p class="note"><Ico Name="folder" Size="13" /> @Drive. Renommez-le, déplacez-le ou retirez-le dans le Drive.</p> }
-        else if (!CanEdit && SharedBy == null) { <p class="note"><Ico Name="lock" Size="13" /> Lecture seule : vous pouvez l'utiliser et le télécharger, pas le modifier.</p> }
+        </aside>
     </div>
-    <div class="df im-df">
-        @if (CanShare) { <button class="btn sm btn-share" @onclick="OnShare"><Ico Name="share" Size="14" /> Partager</button> }
-        @if (Item.FileName != null) { <a class="btn ghost sm" href="/media/@Item.FileName" download="@Item.Name" title="Télécharger"><Ico Name="download" Size="14" /> <span class="im-lbl">Télécharger</span></a> }
-        @if (CanEdit && Drive == null)
-        {
-            <button class="btn ghost sm icon" title="Renommer" aria-label="Renommer" @onclick="OnRename"><Ico Name="edit" Size="14" /></button>
-            @if (OnFolder.HasDelegate) { <button class="btn ghost sm" @onclick="OnFolder"><Ico Name="folder" Size="14" /> Ranger…</button> }
-            @if (OnArea.HasDelegate) { <button class="btn ghost sm" @onclick="OnArea"><Ico Name="move" Size="14" /> Autre aire…</button> }
-            <span class="grow"></span>
-            @if (CanDelete) { <button class="btn danger sm icon" title="Supprimer" aria-label="Supprimer" @onclick="OnDelete"><Ico Name="trash" Size="14" /></button> }
-        }
-        @if (SharedBy != null && CanLeave)
-        {
-            <span class="grow"></span>
-            <button class="btn danger sm" title="Ce média disparaît de votre médiathèque" @onclick="OnLeave"><Ico Name="eye-off" Size="14" /> Ne plus voir</button>
-        }
-    </div>
-</aside>
+</div>
 
 @code {
     [Parameter, EditorRequired] public MediaItem Item { get; set; } = default!;
@@ -179,10 +255,67 @@
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnPrev { get; set; }
     [Parameter] public EventCallback OnNext { get; set; }
-    [Parameter] public EventCallback OnRename { get; set; }
+    /// <summary>Nouveau nom, saisi en cliquant sur le titre (comme une liste de lecture).</summary>
+    [Parameter] public EventCallback<string> OnRenameTo { get; set; }
+    /// <summary>Les médias de la position ouverte (fil de vignettes sous l'image) et le choix de l'un d'eux.</summary>
+    [Parameter] public IReadOnlyList<MediaItem>? Siblings { get; set; }
+    [Parameter] public EventCallback<Guid> OnPick { get; set; }
+    /// <summary>Image modifiable que l'on peut pivoter ; true = à droite.</summary>
+    [Parameter] public bool CanRotate { get; set; }
+    [Parameter] public EventCallback<bool> OnRotate { get; set; }
     [Parameter] public EventCallback OnFolder { get; set; }
     [Parameter] public EventCallback OnArea { get; set; }
     [Parameter] public EventCallback OnDelete { get; set; }
+
+    // ---------- Fenêtre : colonne d'infos (masquée au départ), zoom, nom modifiable, plein écran ----------
+
+    private bool info;
+    private static readonly double[] Zf = { 1, 1.25, 1.5, 2, 3 };   // zoom : multiple de la taille ajustée à la fenêtre
+    private string MediaVars => System.FormattableString.Invariant($"--r:{(Item.Width is > 0 && Item.Height is > 0 ? (double)Item.Width.Value / Item.Height.Value : 16d / 9):0.####};--z:{Zf[zoom]}");
+    private int zoom;   // 0 = image ajustée ; 1 à 4 = 150 % à 300 %
+    private bool renaming;
+    private string renameVal = "";
+    private bool focusRename;
+    private ElementReference renameInput;
+
+    private string? Position
+    {
+        get
+        {
+            if (Siblings is not { Count: > 1 } l) return null;
+            var i = l.ToList().FindIndex(x => x.Id == Item.Id);
+            return i >= 0 ? $"{i + 1} / {l.Count}" : null;
+        }
+    }
+
+    private void StartRename()
+    {
+        if (!Editable || !OnRenameTo.HasDelegate || renaming) return;
+        renameVal = Item.Name; renaming = true; focusRename = true;
+    }
+
+    private void RenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") _ = CommitRename();
+        else if (e.Key == "Escape") renaming = false;
+    }
+
+    private async Task CommitRename()
+    {
+        if (!renaming) return;
+        renaming = false;
+        var n = renameVal.Trim();
+        if (n.Length > 0 && n != Item.Name) await OnRenameTo.InvokeAsync(n);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusRename && renaming)
+        {
+            focusRename = false;
+            try { await renameInput.FocusAsync(); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
+    }
 
     // ---------- Médiathèque intelligente : description, mots-clés, cadrage portrait ----------
 
@@ -240,7 +373,7 @@
     protected override void OnParametersSet()
     {
         if (loadedFor == Item.Id && uses != null) return;
-        loadedFor = Item.Id;
+        loadedFor = Item.Id; zoom = 0; renaming = false;
         uses = Library.Uses(Item.Id);
         aiState = AiSvc.State(Store.ClientId, "media"); adding = analyzing = false; aiMessage = null;
     }
