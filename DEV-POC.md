@@ -4012,3 +4012,11 @@ Même principe que les compositions (§231) : l'assistant propose l'action, la p
 - Tests : `AiInteractiveTests` (5 : repères, fusion, création, page supprimée, copie, QR gardé), `AiAssistantTests` (enchaînement création puis borne, copie puis renommage).
 - **Vérifié** : compilation ; tests (suite complète : 44 échecs, les mêmes qu'avant) ; création d'une liste par l'assistant dans le navigateur avec un faux serveur IA (liste de 2 pages et 4 tuiles enregistrée) ; l'utilisateur a confirmé de son côté que la création fonctionne.
 - **Non vérifié** : modification d'une liste, copie, renommage et attribution à une borne dans le navigateur ; rechargement de l'éditeur ouvert ; mise à jour automatique de la page des listes (ajoutée après l'essai) ; qualité des mises en page de la vraie IA ; rendu sur une vraie borne.
+
+## 250. Menu latéral : « Assistant IA » en bas, pied du menu allégé en mode Simple (13 novembre 2026) : demande de l'utilisateur, sans maquette.
+
+- **Assistant IA** : le bouton quitte le haut du menu (sous le logo) pour le pied (`nav-foot`), juste au-dessus du sélecteur « Mode expert » ; renommé « Assistant IA » (libellé et infobulle). Marges resserrées dans `app.css` (`.nav-ai`).
+- **Mode Simple seulement** (`QuickBar`, paramètre `Simple`) : plus de bouton Notifications, Aide ni Réglages dans la rangée d'icônes. Le menu du compte perd « Aide et contact » et reçoit à la place « Premiers pas », « Connecter un écran », « Réglages » (administrateur) et « Centre d'aide », avec les mêmes conditions d'affichage qu'avant.
+- **Mode Expert** : inchangé.
+- Petit écran et app mobile : non touchés (entrées `nav-legacy`).
+- **Vérifié** : compilation. **Non vérifié** : rendu dans l'application, menu du compte en mode Simple.
