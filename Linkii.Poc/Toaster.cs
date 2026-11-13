@@ -5,7 +5,7 @@ namespace Linkii.Poc;
 public class Toaster
 {
     /// <summary>Action : bouton facultatif du message (ex. « Annuler » après un retrait), qui ferme le message une fois cliqué.</summary>
-    public record Toast(Guid Id, string Text, bool Ok, string? ActionLabel = null, Func<Task>? Action = null);
+    public record Toast(Guid Id, string Text, bool Ok, string? ActionLabel = null, Func<Task>? Action = null, bool Warn = false);
 
     private readonly List<Toast> items = new();
     private readonly object gate = new();
@@ -16,6 +16,8 @@ public class Toaster
 
     public void Ok(string? text) => Add(text, true);
     public void Error(string? text) => Add(text, false);
+    /// <summary>Avertissement orange (information qui n'empêche rien : service en pause…).</summary>
+    public void Warn(string? text) => Add(text, true, null, null, true);
     /// <summary>Confirmation avec un bouton (« Annuler »…) ; le message reste un peu plus longtemps pour laisser le temps de cliquer.</summary>
     public void Ok(string? text, string actionLabel, Func<Task> action) => Add(text, true, actionLabel, action);
     /// <summary>Message rouge avec un bouton (« Voir »…).</summary>
@@ -35,10 +37,10 @@ public class Toaster
         if (removed) Changed?.Invoke();
     }
 
-    private void Add(string? text, bool ok, string? actionLabel = null, Func<Task>? action = null)
+    private void Add(string? text, bool ok, string? actionLabel = null, Func<Task>? action = null, bool warn = false)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
-        var t = new Toast(Guid.NewGuid(), text.Trim(), ok, actionLabel, action);
+        var t = new Toast(Guid.NewGuid(), text.Trim(), ok, actionLabel, action, warn);
         lock (gate)
         {
             items.RemoveAll(x => x.Text == t.Text);   // même message répété : un seul affiché

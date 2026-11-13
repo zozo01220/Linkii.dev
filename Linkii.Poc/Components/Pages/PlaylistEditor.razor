@@ -71,10 +71,6 @@
                 {
                     <div class="ai-bar up"><Ico Name="crown" Size="16" /><span>La relecture automatique avant publication est comprise dans le plan Pro.</span><span class="grow"></span><a class="btn ghost sm" href="/settings?tab=abonnement">Voir les plans</a></div>
                 }
-                else if (revState.Status is AiStatus.Quota or AiStatus.Cap)
-                {
-                    <div class="ai-bar up"><Ico Name="alert" Size="16" /><span>Relecture de l'IA en pause : @(revState.Trial ? "les demandes de l'essai sont utilisées" : "quota du mois atteint"). Vous pouvez publier normalement.</span></div>
-                }
             }
 
             @* une ligne par contenu ; vide : une zone de dépôt qui dit quoi faire *@
@@ -623,12 +619,23 @@ else
     private Guid revForList;
     private CancellationTokenSource? revCts;
 
+    // Relecture en pause (quota du mois ou demandes de l'essai utilisées) : message orange, une fois par liste ouverte.
+    private Guid pauseToastList;
+    private void PauseToast(Playlist pl)
+    {
+        if (revState.Status is not (AiStatus.Quota or AiStatus.Cap) || pl.Draft.Count == 0 || pauseToastList == pl.Id) return;
+        pauseToastList = pl.Id;
+        var why = revState.Trial ? "les demandes de l'essai sont utilisées" : "quota du mois atteint";
+        Toast.Warn("Relecture de l'IA en pause : " + why + ". Vous pouvez publier normalement.");
+    }
+
     /// <summary>Lance la relecture (après un court délai) quand la liste a changé depuis la dernière ; sans changement, rien ne repart.</summary>
     private void QueueReview()
     {
         if (Current is not { } pl) return;
         var cid = Store.ClientId;
         revState = AiSvc.State(cid, "review");
+        PauseToast(pl);
         if (!revState.Available || pl.Draft.Count == 0) { rev = null; revFor = -1; return; }
         if (revForList == pl.Id && revFor == pl.Revision) return;
         if (revForList != pl.Id) rev = null;

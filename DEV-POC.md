@@ -4026,3 +4026,9 @@ Même principe que les compositions (§231) : l'assistant propose l'action, la p
 - Le menu de durée d'un contenu (`PlaylistEditor`, `.le-dp`) garde ses raccourcis (3 s à 2 min) et gagne une section « Durée personnalisée » : champs minutes et secondes + « OK ». Ils partent de la durée actuelle du contenu ; durée bornée entre 1 s et 24 h (`ApplyCustomDuration`).
 - L'interrupteur « Appliquer à tous les contenus » vaut aussi pour la durée saisie (même `SetDuration`).
 - **Vérifié** : compilation. **Non vérifié** : rendu et saisie dans le navigateur.
+
+## 252. Quota de l'IA atteint : popup orange et bouton Assistant IA ambre (13 novembre 2026) : demande de l'utilisateur, maquette de 3 variantes (A retenue).
+
+- **Relecture en pause** : le message « Relecture de l'IA en pause : quota du mois atteint (ou demandes de l'essai utilisées). Vous pouvez publier normalement. » n'est plus une barre fixe sous l'en-tête de la liste mais un popup orange, une fois par liste ouverte (`PauseToast`, appelé par `QueueReview`). Nouveau type `Toaster.Warn` (orange `--warn`, icône d'alerte ; `Toasts.razor`, `.toast.warn`), réutilisable. La barre « relecture comprise dans le plan Pro » reste fixe.
+- **Bouton Assistant IA** (`AssistantButton`, `.nav-ai.quota`) : quand l'état de l'assistant est Quota ou Cap, fond ambre pâle, icône ambre et pastille « Quota atteint » à la place de « Ctrl J ». Reste cliquable. Infobulle « Quota du mois atteint » ou « Demandes de l'essai utilisées » (essai).
+- **Vérifié** : compilation. **Non vérifié** : rendu dans le navigateur.
