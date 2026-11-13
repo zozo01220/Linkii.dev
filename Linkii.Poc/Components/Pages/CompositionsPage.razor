@@ -66,30 +66,7 @@
                 @if (Modes.Simple) { if (items.Count > 0) { <SimpleSearch @bind-Value="search" /> } }   @* mode Simple : « Modèles » est dans le menu Ajouter *@
                 else { <button type="button" class="btn btn-share cmp-models-btn" aria-haspopup="dialog" @onclick='() => OpenModels("gallery")'><Ico Name="images" Size="16" /> Modèles</button> }
                 @* Un seul bouton « Ajouter » (même menu que la médiathèque). Look « app » : bouton flottant via les sources [data-fab]. *@
-                <div class="lx-add">
-                    <button type="button" class="btn lx-add-btn" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
-                    @if (newMenu)
-                    {
-                        <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
-                        <div class="kebab-menu lx-add-menu" role="menu">
-                            <button type="button" role="menuitem" @onclick="() => { newMenu = false; Create(); }"><Ico Name="grid" Size="18" /><span><b>Nouvelle composition</b><small>À partir d'une page vierge</small></span></button>
-                            @if (AiSvc.State(Store.ClientId).Status != AiStatus.Off)
-                            {
-                                <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenAi(); }"><Ico Name="spark" Size="18" /><span><b>Créer avec l'IA</b><small>Décrivez-la en une phrase</small></span>@if (AiSvc.State(Store.ClientId).Status == AiStatus.NeedsPro) { <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span> }</button>
-                            }
-                            <button type="button" role="menuitem" @onclick='() => { newMenu = false; OpenModels("gallery"); }'><Ico Name="images" Size="18" /><span><b>Depuis un modèle</b><small>Galerie de modèles par secteur</small></span></button>
-                            @if (CanCreateFolderHere)
-                            {
-                                <span class="sep" role="separator"></span>
-                                <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button>
-                            }
-                        </div>
-                    }
-                    <span class="lx-fabsrc" aria-hidden="true">
-                        <button type="button" tabindex="-1" data-fab="Créer une composition" @onclick="Create"><Ico Name="plus" Size="16" /></button>
-                        @if (CanCreateFolderHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
-                    </span>
-                </div>
+                @if (!TileMode) { @AddBlock(false) }
             }
             else if (CanCreateFolderHere) { <button type="button" class="btn ghost" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
         </div>
@@ -111,7 +88,18 @@ else
     <NewMark Family="compositions" Tab="@tab" Ids="@items.Select(c => c.Id).Concat(folderRows.Select(r => r.Folder.Id))" />
 
     @* filtre « Afficher » posé : jamais cet état vide, qui cache la barre des filtres (voir plus bas « Rien n'a encore été partagé avec vous ») *@
-    @if (scopeItems.Count == 0 && subfolders.Count == 0 && folderId == null && !OwnerOn)
+    @if (PageEmpty && TileMode)
+    {
+        @* mode Simple, page vide : la tuile « + » seule, avec une phrase d'aide (maquette tuile-ajouter.html) *@
+        <div class="lx-tile-empty">
+            <div class="lx-tile-solo">@AddBlock(true)</div>
+            <div class="hint">
+                <h3>Aucune composition</h3>
+                <p>Une composition assemble texte, images, horloge et données sur un même écran. Créez-la avec la tuile «&nbsp;+&nbsp;» ou partez d'un modèle.</p>
+            </div>
+        </div>
+    }
+    else if (PageEmpty)
     {
         <div class="empty">
             <div class="big">Aucune composition</div>
@@ -290,6 +278,7 @@ else
         }
         @* sur mobile, toujours en cartes (pas de bascule) *@
         <div class="cmp-grid @(picked.Count > 0 ? "cmp-selecting" : "") @(view == "list" ? "lx-mobile-only" : "")">
+            @if (TileMode) { @AddBlock(true) }
             @foreach (var c in Sorted)
             {
                 var it = c;
@@ -301,7 +290,7 @@ else
                     @if (Selectable(it)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(it.Id)" @onchange="() => Toggle(it.Id)" aria-label="Sélectionner @it.Name" /> }
                     @if (r >= FolderRight.Write) { <a class="cmp-open" href="/compositions/@it.Id" aria-label="Modifier « @it.Name »" @onclick="() => Click(it)" @onclick:preventDefault="@(picked.Count > 0)"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></a> }
                     else { <div class="cmp-open" title="Lecture seule : dupliquez-la pour l'adapter"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></div> }
-                    @if (Modes.Simple && lists.Count > 0) { <span class="sh-stat cmp-stat"><i class="d"></i>Dans @lists.Count liste@(lists.Count > 1 ? "s" : "")</span> }
+                    @ReachBadge(it, lists.Count)   @* sur combien d'écrans elle passe (modes Simple et Expert) *@
                     <div class="cmp-info">
                         <div class="cmp-t">
                             @if (Modes.Simple) { <InlineName Value="@it.Name" Class="cmp-n" ReadOnly="@(r < FolderRight.Write)" OnCommit="n => RenameInline(it, n)" /> }
@@ -541,6 +530,35 @@ else
 }
 
 @code {
+    /// <summary>Mode Simple, vue en cartes : « + » en première carte de la grille à la place du bouton « Ajouter » de l'en-tête.</summary>
+    private bool TileMode => Modes.Simple && installed && CanCreateHere && (PageEmpty || view != "list" && Sorted.Any());
+    private bool PageEmpty => scopeItems.Count == 0 && subfolders.Count == 0 && folderId == null && !OwnerOn;
+
+    private RenderFragment<bool> AddBlock => tile => @<div class="lx-add @(tile ? "as-tile" : "")">
+        <button type="button" class="btn lx-add-btn" aria-label="Ajouter" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="@(tile ? 40 : 16)" />@if (!tile) { <text> Ajouter <Ico Name="chevron" Size="14" /></text> }</button>
+        @if (newMenu)
+        {
+            <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+            <div class="kebab-menu lx-add-menu" role="menu">
+                <button type="button" role="menuitem" @onclick="() => { newMenu = false; Create(); }"><Ico Name="grid" Size="18" /><span><b>Nouvelle composition</b><small>À partir d'une page vierge</small></span></button>
+                @if (AiSvc.State(Store.ClientId).Status != AiStatus.Off)
+                {
+                    <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenAi(); }"><Ico Name="spark" Size="18" /><span><b>Créer avec l'IA</b><small>Décrivez-la en une phrase</small></span>@if (AiSvc.State(Store.ClientId).Status == AiStatus.NeedsPro) { <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span> }</button>
+                }
+                <button type="button" role="menuitem" @onclick='() => { newMenu = false; OpenModels("gallery"); }'><Ico Name="images" Size="18" /><span><b>Depuis un modèle</b><small>Galerie de modèles par secteur</small></span></button>
+                @if (CanCreateFolderHere)
+                {
+                    <span class="sep" role="separator"></span>
+                    <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button>
+                }
+            </div>
+        }
+        <span class="lx-fabsrc" aria-hidden="true">
+            <button type="button" tabindex="-1" data-fab="Créer une composition" @onclick="Create"><Ico Name="plus" Size="16" /></button>
+            @if (CanCreateFolderHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
+        </span>
+    </div>;
+
     // ---------- Dossiers (25 octobre 2026) : comme la Médiathèque et les Listes de lecture, liés aux onglets ----------
     private static readonly Guid RootDrop = Guid.Empty;   // cible « racine » du glisser-déposer (fil d'Ariane)
     private bool canCreateRoot, inApp;
@@ -720,6 +738,7 @@ else
     private bool scopeAll = true, newMenu;   // recherche et filtres : toutes les compositions (défaut) ou le dossier ouvert
     private bool Active => search.Length > 0 || filter != "";
     private bool ShowPath => Active && scopeAll;
+    private bool OnScreen(MediaItem c) => ReachOf(c.Id).Screens.Count > 0;
     private int UsedIn(MediaItem c) => usage.TryGetValue(c.Id, out var l) ? l.Count : 0;
 
     // Menu « Filtres » : afficher (à plusieurs dans l'organisation, §212), utilisation
@@ -738,8 +757,8 @@ else
             list.Add(new FilterGroup("use", "Utilisation", filter, new List<FilterOption>
             {
                 new("", "Toutes"),
-                new("used", "Dans une liste", scopeItems.Count(c => UsedIn(c) > 0), "Placées dans au moins une liste de lecture"),
-                new("unused", "Dans aucune liste", scopeItems.Count(c => UsedIn(c) == 0))
+                new("used", "Diffusée sur un écran", scopeItems.Count(OnScreen), "Publiée sur au moins un écran"),
+                new("unused", "Sur aucun écran", scopeItems.Count(c => !OnScreen(c)))
             }));
             return list;
         }
@@ -760,7 +779,7 @@ else
         get
         {
             var pool = ShowPath ? scopeItems : Shown;
-            var q = pool.Where(c => filter switch { "used" => UsedIn(c) > 0, "unused" => UsedIn(c) == 0, _ => true })
+            var q = pool.Where(c => filter switch { "used" => OnScreen(c), "unused" => !OnScreen(c), _ => true })
                 .Where(c => search.Length == 0 || c.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
             return sort == "used"
                 ? q.OrderByDescending(UsedIn).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
@@ -900,6 +919,100 @@ else
     private List<MediaItem> items = new(), files = new();
     private List<CompositionTemplate> templates = new();
     private Dictionary<Guid, List<string>> usage = new();
+
+    // ---------- Écrans qui diffusent chaque composition (maquette compo-carte-ecrans.html, 13 novembre 2026) ----------
+    // Diffusée : un élément de l'instantané publié d'un écran (toutes ses zones) est cette composition. À publier : elle est dans une liste d'une zone de l'écran, pas encore publiée.
+    private sealed record ReachScreen(string Name, bool Online, string Via, string? Ago);
+    private sealed class Reach
+    {
+        public List<ReachScreen> Screens { get; } = new();
+        public HashSet<Guid> PendingScreens { get; } = new();
+        public HashSet<string> PendingLists { get; } = new();
+        public int Offline => Screens.Count(s => !s.Online);
+    }
+    private Dictionary<Guid, Reach> reach = new();
+    private Guid? reachOpen;   // fenêtre « Diffusée sur N écrans » ouverte sur cette carte
+    private Reach ReachOf(Guid id) => reach.GetValueOrDefault(id) ?? new();
+
+    private Dictionary<Guid, Reach> BuildReach(ClientDb d)
+    {
+        var compo = items.Select(c => c.Id).ToHashSet();
+        var res = new Dictionary<Guid, Reach>();
+        Reach R(Guid id) => res.TryGetValue(id, out var r) ? r : res[id] = new Reach();
+        // élément de liste -> (composition, nom de la liste) ; l'instantané publié garde l'identifiant de l'élément
+        var itemOf = d.Playlists.SelectMany(p => p.Draft.Where(i => compo.Contains(i.MediaId)).Select(i => (i.Id, i.MediaId, p.Name)))
+            .GroupBy(x => x.Id).ToDictionary(g => g.Key, g => (g.First().MediaId, g.First().Name));
+        var now = DateTime.UtcNow;
+        foreach (var s in d.Screens.Where(s => s.Kiosk == null && s.Room == null))
+        {
+            var pub = s.PublishedVersion > 0
+                ? s.Published.Concat(s.PublishedZones.SelectMany(z => z))
+                : d.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId)?.Published ?? Enumerable.Empty<PublishedItem>();
+            var on = d.Status(s) is "En ligne" or "Mise à jour";
+            string? ago = on || s.LastSeenUtc is not { } seen ? null : (now - seen) switch
+            {
+                var t when t.TotalMinutes < 60 => $"depuis {Math.Max(1, (int)t.TotalMinutes)} min",
+                var t when t.TotalHours < 24 => $"depuis {(int)t.TotalHours} h",
+                var t => $"depuis {(int)t.TotalDays} j"
+            };
+            var shown = new HashSet<Guid>();
+            foreach (var pi in pub)
+                if (itemOf.TryGetValue(pi.Id, out var x) && shown.Add(x.MediaId)) R(x.MediaId).Screens.Add(new(s.Name, on, x.Name, ago));
+            foreach (var pl in s.ZonePlaylists().OfType<Guid>().Distinct().Select(id => d.Playlists.FirstOrDefault(p => p.Id == id)).OfType<Playlist>())
+                foreach (var m in pl.Draft.Select(i => i.MediaId).Where(compo.Contains).Distinct().Where(m => !shown.Contains(m)))
+                { R(m).PendingScreens.Add(s.Id); R(m).PendingLists.Add(pl.Name); }
+        }
+        foreach (var r in res.Values) r.Screens.Sort((a, b) => a.Online != b.Online ? (a.Online ? -1 : 1) : string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+        return res;
+    }
+
+    private static string ScreenCount(int n) => n > 1 ? $"{n} écrans" : $"{n} écran";
+
+    // pastille en haut de la carte : sur combien d'écrans elle passe, et s'ils sont en ligne
+    private RenderFragment ReachBadge(MediaItem it, int lists) => __builder =>
+    {
+        var rc = ReachOf(it.Id);
+        var n = rc.Screens.Count;
+        var open = reachOpen == it.Id;
+        if (n > 0 || rc.PendingScreens.Count > 0)
+        {
+            var state = n == 0 ? "warn" : rc.Offline == 0 ? "ok" : rc.Offline < n ? "warn" : "off";
+            <button type="button" class="cmp-reach" aria-haspopup="dialog" aria-expanded="@(open ? "true" : "false")" @onclick:stopPropagation="true" @onclick="() => reachOpen = open ? null : it.Id">
+                <i class="d @state"></i>
+                @if (n == 0) { <span>Bientôt sur @ScreenCount(rc.PendingScreens.Count) · à publier</span> }
+                else if (rc.Offline == 0) { <span>Sur @ScreenCount(n)</span> }
+                else if (rc.Offline < n) { <span>Sur @ScreenCount(n) · <em>@rc.Offline hors ligne</em></span> }
+                else { <span>Sur @ScreenCount(n) · <em>hors ligne</em></span> }
+            </button>
+            @if (open)
+            {
+                <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => reachOpen = null"></div>
+                <div class="cmp-reach-pop" role="dialog" aria-label="Écrans qui diffusent « @it.Name »" @onclick:stopPropagation="true">
+                    @if (n == 0)
+                    {
+                        <b>Pas encore diffusée</b>
+                        <p>Elle est dans @(rc.PendingLists.Count == 1 ? $"« {rc.PendingLists.First()} »" : $"{rc.PendingLists.Count} listes"), prévue sur @ScreenCount(rc.PendingScreens.Count), mais pas encore publiée.</p>
+                    }
+                    else
+                    {
+                        <b>Diffusée sur @ScreenCount(n)</b>
+                        <ul>
+                            @foreach (var sc in rc.Screens)
+                            {
+                                <li><i class="d @(sc.Online ? "ok" : "off")"></i><span class="nm">@sc.Name</span><small>@(sc.Online ? $"via « {sc.Via} »" : "hors ligne" + (sc.Ago != null ? " · " + sc.Ago : ""))</small></li>
+                            }
+                        </ul>
+                        @if (rc.PendingScreens.Count > 0) { <p class="pend">Bientôt aussi sur @ScreenCount(rc.PendingScreens.Count) : à publier.</p> }
+                    }
+                    <div class="via">Dans @lists liste@(lists > 1 ? "s" : "") de lecture · <a href="/playlists">Voir les listes →</a></div>
+                </div>
+            }
+        }
+        else if (lists > 0)
+        {
+            <span class="cmp-reach idle"><i class="d none"></i><span>Sur aucun écran</span></span>
+        }
+    };
     private Guid? menuFor;
     private MediaItem? deleting;
 
@@ -971,6 +1084,7 @@ else
         picked.IntersectWith(items.Where(Selectable).Select(c => c.Id));   // une composition supprimée ou devenue illisible quitte la sélection
         usage = Store.Read(d => d.Playlists.SelectMany(p => p.Draft.Select(i => (i.MediaId, p.Name)))
             .Where(x => items.Any(c => c.Id == x.MediaId)).GroupBy(x => x.MediaId).ToDictionary(g => g.Key, g => g.Select(x => x.Name).Distinct().ToList()));
+        reach = Store.Read(BuildReach);
     }
 
     // La vignette d'un modèle utilise le même rendu qu'une composition

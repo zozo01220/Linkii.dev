@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Composition : sur combien d'écrans</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--brand:#0B1F3A;--signal:#3B82C4;--ok:#2FB36F;--warn:#D98A1E;--danger:#C8372D;--radius:4px;--card-radius:10px}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h3,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button{font:inherit;color:inherit}
+.note{background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:10px 24px;font-size:13px;color:#6B5200}
+.note ul{margin:4px 0 0;padding-left:18px}
+.pick{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:10px 24px;background:#fff;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}
+.seg button{border:0;background:#fff;padding:5px 12px;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--brand);color:#fff}
+main{max-width:1500px;padding:28px 40px 60px}
+.head{margin-bottom:22px}.head h1{font-size:28px;line-height:1.2}.head .sub{color:var(--muted);font-size:14px;margin-top:4px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+@media (max-width:1100px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--card-radius);overflow:visible;display:flex;flex-direction:column;position:relative}
+.thumb{height:190px;border-radius:var(--card-radius) var(--card-radius) 0 0;display:grid;place-items:center;color:#fff;font-weight:600;font-size:20px;text-align:center;padding:10px;position:relative}
+.thumb.p{background:#EEF1F5}.thumb.p span{width:110px;height:100%;display:grid;place-items:center;font-size:13px;border-radius:2px}
+.body{padding:12px 14px 14px}.body b{display:block;font-size:15px}.body small{color:var(--muted);font-size:13px}
+.add{background:#fff;border:1px solid var(--line);border-radius:var(--card-radius);display:grid;place-items:center;min-height:270px}
+.add i{width:76px;height:76px;border-radius:50%;background:#E7F0F9;display:grid;place-items:center;color:var(--signal);font-size:40px;font-style:normal;font-weight:300}
+
+/* la pastille */
+.st{position:absolute;left:10px;top:10px;display:inline-flex;align-items:center;gap:6px;background:#fff;color:var(--ink);border:0;border-radius:999px;padding:3px 10px 3px 8px;font-size:12.5px;font-weight:500;box-shadow:0 1px 3px rgba(11,31,58,.18);cursor:pointer;z-index:2}
+.st:hover{box-shadow:0 0 0 2px var(--signal)}
+.st .d{width:8px;height:8px;border-radius:50%;flex:none}
+.st .x{color:var(--danger);font-weight:500}
+.st.idle{color:var(--muted);font-weight:400;cursor:default}
+.st.idle:hover{box-shadow:0 1px 3px rgba(11,31,58,.18)}
+.d.ok{background:var(--ok)}.d.warn{background:var(--warn)}.d.off{background:var(--danger)}.d.none{background:#A9B3BF}
+/* fenêtre au clic */
+.pop{position:absolute;left:10px;top:44px;width:330px;background:#fff;border:1px solid var(--line-2);border-radius:8px;box-shadow:0 12px 30px rgba(11,31,58,.18);padding:12px;z-index:5;font-size:13.5px;display:none}
+.pop.open{display:block}
+.pop h3{font-size:14px;margin-bottom:8px}
+.pop .row{display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:4px}
+.pop .row:hover{background:var(--bg)}
+.pop .row .d{width:8px;height:8px;border-radius:50%}
+.pop .row small{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+.pop .via{color:var(--muted);font-size:12px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+.pop .via a{color:var(--signal);text-decoration:none}
+.legend{margin-top:36px;background:#fff;border:1px solid var(--line);border-radius:var(--card-radius);padding:18px 22px;max-width:900px}
+.legend h3{font-size:16px;margin-bottom:10px}
+.legend table{border-collapse:collapse;width:100%;font-size:14px}
+.legend td{padding:8px 10px;border-top:1px solid var(--line);vertical-align:top}
+.legend td:first-child{white-space:nowrap;width:1%}
+.legend .st{position:static;box-shadow:0 0 0 1px var(--line);cursor:default}
+</style>
+</head>
+<body>
+<div class="note"><b>Proposition (rien n'est codé) :</b> la pastille en haut de la carte ne compte plus les <i>listes</i>, mais les <b>écrans qui diffusent la composition en ce moment</b>.
+<ul>
+<li>On compte un écran quand une de ses zones diffuse une liste <b>publiée</b> qui contient la composition. Un mur compte pour autant d'écrans qu'il en a.</li>
+<li>La couleur du point donne l'état : vert si tous ces écrans sont en ligne, orange si une partie est hors ligne, rouge si aucun ne l'est. Un point gris veut dire qu'aucun écran ne la diffuse.</li>
+<li>Un clic sur la pastille ouvre la liste des écrans (état, liste par laquelle elle passe). Le nombre de listes reste visible en bas de cette fenêtre.</li>
+<li>Le menu Filtres suit le même vocabulaire : « Diffusée sur un écran / Sur aucun écran » au lieu de « Dans une liste / Dans aucune liste ».</li>
+</ul></div>
+<div class="pick">Pastille d'une composition qui n'est dans aucune liste
+  <span class="seg" id="none"><button data-v="hide" class="on">Rien</button><button data-v="show">« Pas encore utilisée »</button></span>
+  <span>— cliquez une pastille pour voir le détail</span>
+</div>
+<main>
+  <div class="head"><h1>Compositions</h1><p class="sub">14 compositions</p></div>
+  <div class="grid" id="grid"></div>
+
+  <section class="legend">
+    <h3>Les états de la pastille</h3>
+    <table id="leg"></table>
+  </section>
+</main>
+<script>
+const C=[
+ {n:'Composition',f:'Paysage',bg:'#14532d',t:'127 jours sans accident',st:'ok',k:3,on:3,lists:1,scr:[['Hall d\'accueil',1,'Accueil'],['Cafétéria',1,'Accueil'],['Atelier',1,'Accueil']]},
+ {n:'Etat Campus Scheduler Cron',f:'Paysage',bg:'#000',t:'Campus scheduled jobs',st:'warn',k:2,on:1,lists:1,scr:[['Boitier Android TV',0,'Campus Cron',' depuis 9 j'],['Ecran photos',1,'Campus Cron']]},
+ {n:'Etat Campus Scheduler Cron (portrait)',f:'Portrait',p:1,bg:'#1d1d1d',t:'Campus scheduled jobs',st:'off',k:1,on:0,lists:1,scr:[['Borne Samsung A57',0,'Cron portrait',' depuis 8 h']]},
+ {n:'État des écrans Linkii',f:'Paysage',bg:'#0b1f3a',t:'Écrans Linkii',st:'pend',k:2,lists:1},
+ {n:'Menus du jour',f:'Portrait',p:1,bg:'#1d1d1d',t:'MENUS DU JOUR',st:'ok',k:1,on:1,lists:1,scr:[['Écran 7',1,'Menus du jour']]},
+ {n:'Mon premier écran',f:'Paysage',bg:'#5b3a1e',t:'Le Montagnard',st:'list',lists:1},
+ {n:'Repas de Noël chez les Prieur\'s',f:'Paysage',bg:'#7f1d1d',t:'Joyeux Noël !',st:'none',lists:0},
+ {n:'Chiffres clé',f:'Paysage',bg:'#0a0f1a',t:'Chiffres clé',st:'ok',k:4,on:4,lists:2,scr:[['Mur du hall · écran 1',1,'Accueil'],['Mur du hall · écran 2',1,'Accueil'],['Mur du hall · écran 3',1,'Accueil'],['Mur du hall · écran 4',1,'Accueil']]}
+];
+let noneMode='hide';
+const pl=(n,a,b)=>n+' '+(n>1?b:a);
+function badge(c){
+ if(c.st==='ok')return `<button class="st" data-p><span class="d ok"></span>Sur ${pl(c.k,'écran','écrans')}</button>`;
+ if(c.st==='warn')return `<button class="st" data-p><span class="d warn"></span>Sur ${pl(c.k,'écran','écrans')} · <span class="x">${c.k-c.on} hors ligne</span></button>`;
+ if(c.st==='off')return `<button class="st" data-p><span class="d off"></span>Sur ${pl(c.k,'écran','écrans')} · <span class="x">hors ligne</span></button>`;
+ if(c.st==='pend')return `<button class="st" data-p><span class="d warn"></span>Bientôt sur ${pl(c.k,'écran','écrans')} · à publier</button>`;
+ if(c.st==='list')return `<span class="st idle"><span class="d none"></span>Sur aucun écran</span>`;
+ return noneMode==='show'?`<span class="st idle"><span class="d none"></span>Pas encore utilisée</span>`:'';
+}
+function pop(c){
+ if(c.st==='pend')return `<div class="pop"><h3>Pas encore diffusée</h3><p style="color:var(--muted)">Elle est dans « État Linkii », prévue sur 2 écrans, mais cette liste n'est pas encore publiée.</p><div class="via"><a href="#">Ouvrir la liste et publier →</a></div></div>`;
+ if(!c.scr)return '';
+ return `<div class="pop"><h3>Diffusée sur ${pl(c.k,'écran','écrans')}</h3>${c.scr.map(s=>`<div class="row"><span class="d ${s[1]?'ok':'off'}"></span>${s[0]}<small>${s[1]?'via « '+s[2]+' »':'hors ligne'+(s[3]||'')}</small></div>`).join('')}
+  <div class="via">Dans ${pl(c.lists,'liste','listes')} de lecture · <a href="#">Voir ${c.lists>1?'les listes':'la liste'} →</a></div></div>`;
+}
+function draw(){
+ document.getElementById('grid').innerHTML=`<div class="add"><i>+</i></div>`+C.map(c=>`<div class="card">
+  <div class="thumb ${c.p?'p':''}" style="${c.p?'':'background:'+c.bg}">${c.p?`<span style="background:${c.bg}">${c.t}</span>`:c.t}${badge(c)}${pop(c)}</div>
+  <div class="body"><b>${c.n}</b><small>${c.f}</small></div></div>`).join('');
+ document.querySelectorAll('[data-p]').forEach(b=>b.onclick=e=>{const p=b.parentElement.querySelector('.pop');const was=p.classList.contains('open');document.querySelectorAll('.pop.open').forEach(x=>x.classList.remove('open'));if(!was)p.classList.add('open');e.stopPropagation()});
+ const L=[['ok','Sur 3 écrans','Tous les écrans qui la diffusent sont en ligne.'],
+  ['warn','Sur 2 écrans · <span class="x">1 hors ligne</span>','Une partie des écrans ne répond plus : le chiffre rouge dit combien.'],
+  ['off','Sur 1 écran · <span class="x">hors ligne</span>','Aucun des écrans qui la diffusent ne répond : personne ne la voit.'],
+  ['warn','Bientôt sur 2 écrans · à publier','Elle est dans une liste choisie pour des écrans, mais la liste n\'est pas publiée.'],
+  ['none','Sur aucun écran','Elle est dans une liste, mais aucun écran ne diffuse cette liste.'],
+  ['none','Pas encore utilisée','Dans aucune liste (pastille facultative, voir le choix en haut).']];
+ document.getElementById('leg').innerHTML=L.map(l=>`<tr><td><span class="st ${l[0]==='none'?'idle':''}"><span class="d ${l[0]}"></span>${l[1]}</span></td><td>${l[2]}</td></tr>`).join('');
+}
+document.addEventListener('click',()=>document.querySelectorAll('.pop.open').forEach(x=>x.classList.remove('open')));
+document.querySelectorAll('#none button').forEach(b=>b.onclick=()=>{noneMode=b.dataset.v;document.querySelectorAll('#none button').forEach(x=>x.classList.toggle('on',x===b));draw()});
+draw();
+</script>
+</body>
+</html>

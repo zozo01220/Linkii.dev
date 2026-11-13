@@ -52,29 +52,7 @@
         }
         @if (CanCreateListHere)
         {
-            <div class="lx-add">
-                @if (CanCreateFolderHere)
-                {
-                    <button type="button" class="btn lx-add-btn" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
-                    @if (newMenu)
-                    {
-                        <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
-                        <div class="kebab-menu lx-add-menu" role="menu">
-                            <button type="button" role="menuitem" @onclick="() => { newMenu = false; Create(); }"><Ico Name="grid" Size="18" /><span><b>Nouvelle liste interactive</b><small>Pages, tuiles et images pour une borne tactile</small></span></button>
-                            <span class="sep" role="separator"></span>
-                            <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button>
-                        </div>
-                    }
-                }
-                else
-                {
-                    <button type="button" class="btn lx-add-btn" @onclick="Create"><Ico Name="plus" Size="16" /> Ajouter</button>
-                }
-                <span class="lx-fabsrc" aria-hidden="true">
-                    <button type="button" tabindex="-1" data-fab="Nouvelle liste interactive" @onclick="Create"><Ico Name="plus" Size="16" /></button>
-                    @if (CanCreateFolderHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
-                </span>
-            </div>
+            @if (!TileMode) { @AddBlock(false) }
         }
         else if (CanCreateFolderHere)
         {
@@ -91,7 +69,18 @@
     }
 </div>
 
-@if (lists.Count == 0 && folderRows.Count == 0)
+@if (PageEmpty && TileMode)
+{
+    @* mode Simple, page vide : la tuile « + » seule, avec une phrase d'aide (maquette tuile-ajouter.html) *@
+    <div class="lx-tile-empty">
+        <div class="lx-tile-solo">@AddBlock(true)</div>
+        <div class="hint">
+            <h3>Aucune liste interactive</h3>
+            <p>Une liste interactive se touche sur une borne : pages, tuiles, images. Créez-la avec la tuile «&nbsp;+&nbsp;».</p>
+        </div>
+    </div>
+}
+else if (PageEmpty)
 {
     <div class="empty">
         <div class="big">Aucune liste interactive</div>
@@ -215,6 +204,7 @@ else
         </div>
         }
         <div class="lx-pgrid @(picked.Count > 0 ? "lx-selecting" : "") @(view == "list" ? "lx-mobile-only" : "")">
+            @if (TileMode) { @AddBlock(true) }
             @foreach (var l in Sorted)
             {
                 var il = l;
@@ -389,6 +379,34 @@ else
 }
 
 @code {
+    /// <summary>Mode Simple, vue en cartes : « + » en première carte de la grille à la place du bouton « Ajouter » de l'en-tête.</summary>
+    private bool TileMode => Modes.Simple && CanCreateListHere && (PageEmpty || view != "list" && Sorted.Any());
+    private bool PageEmpty => lists.Count == 0 && folderRows.Count == 0;
+
+    private RenderFragment<bool> AddBlock => tile => @<div class="lx-add @(tile ? "as-tile" : "")">
+        @if (CanCreateFolderHere)
+        {
+            <button type="button" class="btn lx-add-btn" aria-label="Ajouter" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="@(tile ? 40 : 16)" />@if (!tile) { <text> Ajouter <Ico Name="chevron" Size="14" /></text> }</button>
+            @if (newMenu)
+            {
+                <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+                <div class="kebab-menu lx-add-menu" role="menu">
+                    <button type="button" role="menuitem" @onclick="() => { newMenu = false; Create(); }"><Ico Name="grid" Size="18" /><span><b>Nouvelle liste interactive</b><small>Pages, tuiles et images pour une borne tactile</small></span></button>
+                    <span class="sep" role="separator"></span>
+                    <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button>
+                </div>
+            }
+        }
+        else
+        {
+            <button type="button" class="btn lx-add-btn" aria-label="Ajouter" @onclick="Create"><Ico Name="plus" Size="@(tile ? 40 : 16)" />@if (!tile) { <text> Ajouter</text> }</button>
+        }
+        <span class="lx-fabsrc" aria-hidden="true">
+            <button type="button" tabindex="-1" data-fab="Nouvelle liste interactive" @onclick="Create"><Ico Name="plus" Size="16" /></button>
+            @if (CanCreateFolderHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
+        </span>
+    </div>;
+
     private List<InteractiveList> lists = new();
     private List<MediaItem> media = new();
     private List<Screen> kiosks = new();

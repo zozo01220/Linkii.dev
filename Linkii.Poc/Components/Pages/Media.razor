@@ -71,6 +71,7 @@
         {
             @* Un seul bouton « Ajouter » (maquette mediatheque-import-boutons-page.html) : ordinateur, adresse web, cloud, nouveau dossier.
                Look « app » : le bouton est masqué, le bouton flottant reprend les mêmes choix (sources [data-fab] cachées, cliquées par app-fab.js). *@
+            @if (!TileMode) {
             <div class="lx-add">
                 @if (Modes.Simple)
                 {
@@ -117,6 +118,7 @@
                     @if (FoldersShown && CanCreateHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
                 </span>
             </div>
+            }
         }
         else if (FoldersShown && CanCreateHere)
         {
@@ -154,7 +156,18 @@ else if (currentRow is { Right: FolderRight.Read })
 <DriveSyncBar />
 
 @* filtre « Afficher » à la racine : jamais cet état vide, qui cache la barre des filtres (voir plus bas « Rien n'a encore été partagé avec vous ») *@
-@if (files.Count == 0 && Jobs.Count == 0 && subfolders.Count == 0 && !Active && (!OwnerOn || folderId != null))
+@if (PageEmpty && TileMode)
+{
+    @* mode Simple, page vide : la tuile « + » seule, avec une phrase d'aide (maquette tuile-ajouter.html) *@
+    <div class="lx-tile-empty">
+        <div class="lx-tile-solo">@MediaTile</div>
+        <div class="hint">
+            <h3>@(folderId != null ? "Ce dossier est vide" : "Votre médiathèque est vide")</h3>
+            <p>Importez vos images et vos vidéos avec la tuile «&nbsp;+&nbsp;», ou glissez-les ici depuis l'ordinateur. Elles serviront dans vos listes de lecture.</p>
+        </div>
+    </div>
+}
+else if (PageEmpty)
 {
     <div class="empty">
         <div class="big">@(folderId != null ? "Ce dossier est vide" : "Votre médiathèque est vide")</div>
@@ -414,6 +427,7 @@ else
         {
         @* sur mobile, toujours en cartes (pas de bascule) *@
         <div class="lx-mgrid @(picked.Count > 0 ? "lx-selecting" : "") @(view == "list" ? "lx-mobile-only" : "")">
+            @if (TileMode) { @MediaTile }
             @foreach (var j in Jobs)
             {
                 var job = j;
@@ -1217,6 +1231,23 @@ else
     private string ComputerFormats => LocalDocuments.FormatsText(Apps.IsInstalled).Length > 0 ? "Images, vidéos et documents" : "Images et vidéos";
 
     // État vide : les deux imports les plus courants, sans passer par le menu
+    private bool PageEmpty => files.Count == 0 && Jobs.Count == 0 && subfolders.Count == 0 && !Active && (!OwnerOn || folderId != null);
+
+    /// <summary>Mode Simple, vue en cartes : « + » en première carte de la grille à la place du bouton « Ajouter » de l'en-tête ; page vide : la tuile seule.</summary>
+    private bool TileMode => Modes.Simple && CanUploadHere && (PageEmpty || view == "cards" && (Visible.Any() || Jobs.Count > 0));
+
+    // mode Simple : la tuile ouvre directement le choix des fichiers, comme l'ancien bouton
+    private RenderFragment MediaTile => __builder =>
+    {
+        <div class="lx-add as-tile">
+            <label for="@FileInputId" class="btn lx-add-btn" role="button" tabindex="0" aria-label="Importer des fichiers" title="Importer des fichiers"><Ico Name="plus" Size="40" /></label>
+            <span class="lx-fabsrc" aria-hidden="true">
+                <label for="@FileInputId" data-fab="Depuis l'ordinateur"><Ico Name="upload" Size="16" /></label>
+                @if (FoldersShown && CanCreateHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
+            </span>
+        </div>
+    };
+
     private RenderFragment EmptyImport => __builder =>
     {
         <div class="lx-empty-acts">

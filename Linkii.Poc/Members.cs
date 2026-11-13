@@ -408,7 +408,7 @@ public static class MemberOps
         if (!System.Text.RegularExpressions.Regex.IsMatch(mail, @"^[^@\s]+@[^@\s]+\.[^@\s]+$")) return (null, "Saisissez une adresse e-mail valide.");
         if (d.EmailTaken(mail)) return (null, d.Users.Any(u => u.Email == mail) ? "Cette personne fait déjà partie de l'organisation." : "Cette adresse e-mail est déjà utilisée.");
         var r = rights.Copy(); r.Clean();
-        var u = new User { Email = mail, Name = name.Trim(), PasswordHash = Passwords.Hash(password), Role = admin ? Roles.ClientAdmin : Roles.ClientMember, MustChangePassword = true, CreatedUtc = DateTime.UtcNow, Rights = r };
+        var u = new User { Email = mail, Name = name.Trim(), PasswordHash = Passwords.Hash(password), Role = admin ? Roles.ClientAdmin : Roles.ClientMember, MustChangePassword = true, CreatedUtc = DateTime.UtcNow, Rights = r, ExpertMode = false };   // nouveau membre : mode Simple
         d.AddUser(u);
         return (u, null);
     }

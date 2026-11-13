@@ -37,7 +37,7 @@ public static class Signup
     /// le jeton est retourné). Une adresse déjà prise par une inscription jamais validée est libérée : la nouvelle inscription la remplace.
     /// </summary>
     public static (Tenant? Client, User? Admin, string? Token, string? Error) Create(Db db, Reseller reseller, string org, string name, string email,
-        string? password, ExternalIdentity? external, Consents consents, DateTime now, bool expert = false, string? trialCode = null)
+        string? password, ExternalIdentity? external, Consents consents, DateTime now, string? trialCode = null)
     {
         if (!consents.Terms) return (null, null, null, "Acceptez les conditions générales pour créer votre espace.");
         if (external == null && string.IsNullOrEmpty(password)) return (null, null, null, "Choisissez un mot de passe.");
@@ -54,7 +54,7 @@ public static class Signup
         admin.TermsVersion = Terms.Version; admin.TermsAcceptedUtc = now;
         admin.MarketingOptIn = consents.Marketing; admin.MarketingOptInUtc = consents.Marketing ? now : null;
         admin.NewsOptIn = consents.News; admin.NewsOptInUtc = consents.News ? now : null;
-        admin.ExpertMode = expert; admin.ExpertIntroSeen = true;   // mode choisi à l'inscription : pas de présentation
+        admin.ExpertMode = false;   // tout nouveau compte démarre en mode Simple, sans choix à l'inscription (13 novembre 2026) ; la présentation s'ouvrira au premier passage en expert
 
         if (external != null)
         {

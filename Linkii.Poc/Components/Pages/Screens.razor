@@ -61,34 +61,9 @@
         }
         @if (canAdd)
         {
-            @* Un seul bouton « Ajouter » (même menu que la médiathèque). Look « app » : le bouton est masqué, le bouton flottant reprend les mêmes choix (sources [data-fab] cachées). *@
-            <div class="lx-add">
-                <button type="button" class="btn lx-add-btn" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
-                @if (newMenu)
-                {
-                    <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
-                    <div class="kebab-menu lx-add-menu" role="menu">
-                        <button type="button" role="menuitem" @onclick="OpenConnect"><Ico Name="monitor" Size="18" /><span><b>Écran de diffusion</b><small>Avec le code affiché sur l'écran</small></span></button>
-                        <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPairKiosk(); }"><Ico Name="hand" Size="18" /><span><b>Borne interactive <span class="kiosk-new">Nouveau</span></b><small>Borne à écran tactile</small></span></button>
-                        @* Écran de salle : seulement avec l'application « Réservation de salle » ; sans elle, visible grisé (mode expert) avec le lien vers le Store *@
-                        @if (roomApp)
-                        {
-                            <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenRoomWizard(null, null); }"><Ico Name="door" Size="18" /><span><b>Écran de salle <span class="kiosk-new">Nouveau</span></b><small>Tablette à la porte d'une salle</small></span></button>
-                        }
-                        else if (Modes.Expert)
-                        {
-                            <button type="button" role="menuitem" disabled><Ico Name="door" Size="18" /><span><b>Écran de salle <span class="badge neutre">Application requise</span></b><small>Installez « Réservation de salle » pour créer des écrans de salle.</small></span></button>
-                            <div class="rb-store"><a class="btn go sm" href="/store">Ouvrir le Store</a></div>
-                        }
-                        @if (FolderOps) { <span class="sep" role="separator"></span> }
-                        @if (FolderOps) { <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button> }
-                    </div>
-                }
-                <span class="lx-fabsrc" aria-hidden="true">
-                    <button type="button" tabindex="-1" data-fab="Connecter un écran" @onclick="OpenConnect"><Ico Name="plus" Size="16" /></button>
-                    @if (FolderOps) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
-                </span>
-            </div>
+            @* Un seul bouton « Ajouter » (même menu que la médiathèque). Look « app » : le bouton est masqué, le bouton flottant reprend les mêmes choix (sources [data-fab] cachées).
+               Mode Simple : le bouton devient la tuile «&nbsp;+&nbsp;» en tête de la grille (AddBlock(true)). *@
+            @if (!TileMode) { @AddBlock(false) }
         }
         else if (!noArea)
         {
@@ -97,6 +72,18 @@
         }
     </div>
 </div>
+
+@if (Has && !noArea)
+{
+    @* Filtre Tous / En ligne / Hors ligne (maquette ecrans-en-ligne-hors-ligne.html), avec le nombre d'écrans de chaque choix *@
+    var fAll = InZone.Count + OtherScope.Count;
+    var fOff = InZone.Count(IsOffline) + OtherScope.Count(o => IsOffline(o.Screen));
+    <div class="sg-filter" role="group" aria-label="Afficher les écrans">
+        <button type="button" class="sg-chip @(statusFilter == "" ? "on" : "")" aria-pressed="@(statusFilter == "" ? "true" : "false")" @onclick='() => statusFilter = ""'>Tous <span class="n">@fAll</span></button>
+        <button type="button" class="sg-chip @(statusFilter == "online" ? "on" : "")" aria-pressed="@(statusFilter == "online" ? "true" : "false")" @onclick='() => statusFilter = "online"'><i class="d on"></i>En ligne <span class="n">@(fAll - fOff)</span></button>
+        <button type="button" class="sg-chip @(statusFilter == "offline" ? "on" : "")" aria-pressed="@(statusFilter == "offline" ? "true" : "false")" @onclick='() => statusFilter = "offline"'><i class="d off"></i>Hors ligne <span class="n">@fOff</span></button>
+    </div>
+}
 
 <ApprovalBanner />
 
@@ -295,6 +282,17 @@ else if (!noArea && NothingToShow)
             </div>
         }
     }
+    else if (canAdd && TileMode)
+    {
+        @* mode Simple : la tuile « + » seule, avec une phrase d'aide (maquette tuile-ajouter.html) *@
+        <div class="lx-tile-empty">
+            <div class="lx-tile-solo">@AddBlock(true)</div>
+            <div class="hint">
+                <h3>@(OtherAll.Count == 0 ? "Aucun écran connecté" : $"Aucun écran dans « {area?.Name} »")</h3>
+                <p>Installez l'app Linkivi sur l'écran (TV, boîtier, PC) : il affiche un code. Saisissez-le avec la tuile «&nbsp;+&nbsp;» pour relier l'écran à votre organisation.</p>
+            </div>
+        </div>
+    }
     else if (canAdd)
     {
         <div class="empty @(OtherAll.Count > 0 ? "compact" : "")">
@@ -324,6 +322,63 @@ else if (!noArea && NothingToShow)
     @* Mode Expert : écrans rangés par aire puis par zone, arbre à gauche *@
     @TreeBody()
 }
+else if (Grouped)
+{
+    @* Modes Simple et Expert, en cartes : deux groupes, En ligne puis Hors ligne (maquette ecrans-en-ligne-hors-ligne.html). Hors ligne : du plus récemment coupé au plus ancien, repliable. *@
+    var onE = Entries.Where(e => !EntryOff(e)).ToList();
+    var offE = Entries.Where(EntryOff).OrderByDescending(EntrySeen).ToList();
+    var onO = OtherShown.Where(o => statusFilter != "offline" && !IsOffline(o.Screen)).ToList();
+    var offO = OtherShown.Where(o => statusFilter == "offline" || IsOffline(o.Screen)).OrderByDescending(o => o.Screen.LastSeenUtc ?? DateTime.MinValue).ToList();
+    var nOn = onE.Sum(EntryCount) + onO.Count;
+    var nOff = offE.Sum(EntryCount) + offO.Count;
+    @if (statusFilter != "offline")
+    {
+        <section class="sg-sect" aria-label="Écrans en ligne">
+            <div class="sg-head"><h2><i class="d on"></i>En ligne <span class="n">@nOn</span></h2></div>
+            <div class="pl-grid">
+                @if (TileMode) { @AddBlock(true) }
+                @foreach (var entry in onE) { @Card(entry) }
+                @foreach (var os in onO) { @LightCard(os.Screen, os.Area) }
+            </div>
+        </section>
+    }
+    @if (nOff > 0)
+    {
+        var shut = offShut && statusFilter == "";
+        <section class="sg-sect sg-off @(statusFilter == "" ? "sep" : "")" aria-label="Écrans hors ligne">
+            <div class="sg-head">
+                <h2><i class="d off"></i>Hors ligne <span class="n">@nOff</span></h2>
+                <span class="sg-hint">du plus récent au plus ancien</span>
+                @if (statusFilter == "")
+                {
+                    <button type="button" class="sg-tog" aria-expanded="@(shut ? "false" : "true")" @onclick="() => offShut = !offShut">@(shut ? "Afficher les cartes" : "Replier") <Ico Name="chevron" Size="14" /></button>
+                }
+            </div>
+            @if (shut)
+            {
+                <div class="sg-strip">
+                    @foreach (var e in offE)
+                    {
+                        var ago = e.Screen is { } es ? OfflineAgo(es, DateTime.UtcNow) : e.Wall is { } ew ? WallMembers(ew).Where(IsOffline).Select(x => OfflineAgo(x, DateTime.UtcNow)).FirstOrDefault(a => a != null) : null;
+                        <button type="button" class="sg-pill" @onclick="() => offShut = false"><i class="d off"></i>@(e.Screen?.Name ?? e.Wall?.Name)@if (ago != null) { <small>@ago</small> }</button>
+                    }
+                    @foreach (var os in offO)
+                    {
+                        var ago = OfflineAgo(os.Screen, DateTime.UtcNow);
+                        <button type="button" class="sg-pill" @onclick="() => offShut = false"><i class="d off"></i>@os.Screen.Name@if (ago != null) { <small>@ago</small> }</button>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="pl-grid">
+                    @foreach (var entry in offE) { @Card(entry) }
+                    @foreach (var os in offO) { @LightCard(os.Screen, os.Area) }
+                </div>
+            }
+        </section>
+    }
+}
 else
 {
 <div class="pl-grid @(ListView ? "list" : "") @(ListView && BatteryCol ? "bat-col" : "")">
@@ -332,6 +387,7 @@ else
         @* en-têtes des colonnes (PC) ; masqués au téléphone *@
         <div class="sc-listhead"><span class="sc-lh-check"><input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" title="Tout sélectionner" /></span><span>Aperçu</span><span></span><span>Écran</span><span>État</span>@if (BatteryCol) { <span class="c">Batterie</span> }<span>Partage</span><span>En diffusion</span><span></span><span></span></div>
     }
+    @if (TileMode && Shown.Count > 0) { @AddBlock(true) }
     @foreach (var entry in Entries) { @Card(entry) }
     @foreach (var os in OtherShown) { if (ListView) { @LightRow(os.Screen, os.Area) } else { @LightCard(os.Screen, os.Area) } }
 </div>
@@ -1341,6 +1397,39 @@ else if (wallEdit is { } wid)
     private Guid? dragFolder, dropOver;
 
     private ScreenFolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
+
+    /// <summary>Mode Simple : « + » en première carte de la grille à la place du bouton « Ajouter » de l'en-tête ; aucun écran ici : la tuile seule.
+    /// Pas pendant les Premiers pas (aucun écran dans l'organisation), qui ont leurs propres boutons.</summary>
+    private bool TileMode => Modes.Simple && canAdd && !noArea && statusFilter != "offline" && (Shown.Count > 0 || NothingToShow && tab != LibraryTab.Shared && !(OtherAll.Count == 0 && !hasAnyScreen));
+
+    private RenderFragment<bool> AddBlock => tile => @<div class="lx-add @(tile ? "as-tile" : "")">
+        <button type="button" class="btn lx-add-btn" aria-label="Ajouter" title="@(tile ? "Connecter un écran" : null)" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="@(tile ? 40 : 16)" />@if (!tile) { <text> Ajouter <Ico Name="chevron" Size="14" /></text> }</button>
+        @if (newMenu)
+        {
+            <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+            <div class="kebab-menu lx-add-menu" role="menu">
+                <button type="button" role="menuitem" @onclick="OpenConnect"><Ico Name="monitor" Size="18" /><span><b>Écran de diffusion</b><small>Avec le code affiché sur l'écran</small></span></button>
+                <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPairKiosk(); }"><Ico Name="hand" Size="18" /><span><b>Borne interactive <span class="kiosk-new">Nouveau</span></b><small>Borne à écran tactile</small></span></button>
+                @* Écran de salle : seulement avec l'application « Réservation de salle » ; sans elle, visible grisé (mode expert) avec le lien vers le Store *@
+                @if (roomApp)
+                {
+                    <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenRoomWizard(null, null); }"><Ico Name="door" Size="18" /><span><b>Écran de salle <span class="kiosk-new">Nouveau</span></b><small>Tablette à la porte d'une salle</small></span></button>
+                }
+                else if (Modes.Expert)
+                {
+                    <button type="button" role="menuitem" disabled><Ico Name="door" Size="18" /><span><b>Écran de salle <span class="badge neutre">Application requise</span></b><small>Installez « Réservation de salle » pour créer des écrans de salle.</small></span></button>
+                    <div class="rb-store"><a class="btn go sm" href="/store">Ouvrir le Store</a></div>
+                }
+                @if (FolderOps) { <span class="sep" role="separator"></span> }
+                @if (FolderOps) { <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button> }
+            </div>
+        }
+        <span class="lx-fabsrc" aria-hidden="true">
+            <button type="button" tabindex="-1" data-fab="Connecter un écran" @onclick="OpenConnect"><Ico Name="plus" Size="16" /></button>
+            @if (FolderOps) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
+        </span>
+    </div>;
+
     // Mode simple (§181) : pas d'onglets ; en bas à droite de la carte, « 2 partages » (bleu, les personnes qui gèrent l'écran) ou « De Anne » (bleu clair) pour l'écran d'un collègue
     private bool Flat => tab == LibraryTab.Flat;
     private Dictionary<Guid, string> ownerNames = new();
@@ -2758,6 +2847,20 @@ else if (wallEdit is { } wid)
     // Cartes affichées : un mur prend une seule carte, à la place de son premier écran retenu par les filtres et le tri.
     private record Entry(Zone? Wall, Screen? Screen);
 
+    // ---------- Groupes En ligne / Hors ligne (modes Simple et Expert, en cartes ; maquette ecrans-en-ligne-hors-ligne.html) ----------
+    // Le filtre Tous / En ligne / Hors ligne vaut pour toutes les vues ; l'Arborescence et la liste de l'Expert ne sont pas regroupées.
+    private bool offShut;   // groupe Hors ligne replié en pastilles (filtre « Tous » seulement)
+    private bool Grouped => !ListView && !TreeView &&(statusFilter is "" or "online" or "offline") && Shown.Count + OtherShown.Count > 0;
+    // un mur est hors ligne quand aucun de ses écrans ne répond ; avec un filtre d'état, tout va dans le groupe du filtre
+    private bool EntryOff(Entry e) => statusFilter switch
+    {
+        "offline" => true,
+        "online" => false,
+        _ => e.Screen is { } s ? IsOffline(s) : WallMembers(e.Wall!).All(IsOffline)
+    };
+    private DateTime EntrySeen(Entry e) => (e.Screen is { } s ? s.LastSeenUtc : WallMembers(e.Wall!).Max(x => x.LastSeenUtc)) ?? DateTime.MinValue;
+    private int EntryCount(Entry e) => e.Screen != null ? 1 : WallMembers(e.Wall!).Count;
+
     private List<Entry> Entries
     {
         get
@@ -3334,6 +3437,13 @@ else if (wallEdit is { } wid)
         if (cleanQuery && !firstRender) { cleanQuery = false; Nav.NavigateTo(Nav.GetUriWithQueryParameters(new Dictionary<string, object?> { ["edit"] = null, ["arbre"] = null, ["zone"] = null, ["connecter"] = null, ["liste"] = null }), replace: true); }
         if (firstRender)
         {
+            // état des écrans à l'arrivée sur la page, dans le message qui s'efface : vert si tout est en ligne, rouge sinon (plus de bandeau dans la page)
+            if (!noArea && InZone.Count + OtherScope.Count > 0)
+            {
+                var nOffline = InZone.Count(IsOffline) + OtherScope.Count(o => IsOffline(o.Screen));
+                if (nOffline == 0) Toast.Ok("Tous vos écrans sont en ligne.");
+                else Toast.Error(nOffline == 1 ? "1 écran est hors ligne." : $"{nOffline} écrans sont hors ligne.");
+            }
             // look app : pas d'arborescence ; densité Vignettes / Lignes mémorisée dans le navigateur
             string? dens = null;
             try { isApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); dens = await JS.InvokeAsync<string?>("linkiiPrefs.get", "screens-densite"); } catch (JSException) { } catch (InvalidOperationException) { }
