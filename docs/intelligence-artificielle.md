@@ -42,7 +42,19 @@ L'étape 1 des Premiers pas devient une zone de l'IA quand l'organisation y a dr
 - **Code** : `AiStart.cs` (`AiStarter` : lecture du site, demande à l'IA, logo, photos, pages, météo, liste, retouches, discussion gardée), `StartTemplates.cs` (contenu `StartBrief` et modèles de pages), `Components/AiStartView.razor` (discussion, écran en direct, « C'est prêt »), `wwwroot/start-ai.js`, hébergé par `WelcomeWizard.razor`.
 - **L'IA écrit, Linkivi met en page** : une demande rend le contenu (textes, couleurs, police, choix du logo et des photos, en voyant les images réduites du site) ; les pages viennent de modèles Linkivi, donc toujours propres. Les retouches (plus chaleureux, plus court, demande libre, anglais) modifient ce contenu, puis les pages sont redessinées ; portrait et logo sans IA ; chaque retouche s'annule.
 - **Aperçu sur téléphone** : QR vers le player en mode aperçu, lien de 24 h gardé dans la base (`PreviewGrants.Share`), fichiers servis avec `?pv=jeton`.
-- **Coût** : 1 demande pour préparer, 1 par retouche de l'IA.
+- **Coût** : 1 demande pour préparer, 1 de plus pour regarder les photos d'internet (seulement s'il y en a à choisir), 1 par retouche de l'IA. « Autres photos », « Autre mise en page », « Ajouter mes photos », portrait et logo ne coûtent rien.
+
+### Des écrans adaptés à l'activité (§248)
+
+Demande du 13 novembre 2026 : l'assistant faisait toujours les mêmes écrans, et un kebab se retrouvait illustré par une barque.
+
+- **Jamais d'image hors sujet** : le repli sur les paysages d'exemple de Linkivi est retiré. Une page sans photo qui convienne garde un décor aux couleurs de l'activité, et l'assistant demande les photos de la personne.
+- **Une photo par page** (`StartBrief.PagePhotos`) : dans sa réponse, l'IA dit pour chaque page ce que la photo doit montrer, en français (nom dans la médiathèque) et en anglais (recherche) : champ `images`, lu par `AiStarter.Queries`. Les photos d'un site passent d'abord ; la banque d'images complète les pages qui restent.
+- **L'IA regarde avant de garder** (`AiStarter.FindPhotos`, `Rank`) : cinq candidates par page, vignettes réduites à 384 px, une seule demande pour toutes les pages. Elle rend les numéros qui conviennent, la meilleure d'abord ; une liste vide laisse la page sans photo. Si cette demande échoue, l'ordre de la banque est gardé.
+- **Pastilles** : « Autres photos » prend la candidate suivante de chaque page (`ImportNext`), « Autre mise en page » retire au sort variantes et décor (`StartTemplates.Shuffle`), « Ajouter mes photos » pose jusqu'à six fichiers de la personne sur les pages. Chacune s'annule.
+- **Mises en page** : trois variantes pour Accueil et Services, deux pour les autres (`StartBrief.Layouts`, `StartTemplates.Variants`), tirées au sort à la préparation. Cinq décors pour les fonds sans photo (`StartBrief.Decor` : cercles, bandes, arches, points, cadre), choisis par l'IA selon le ton.
+- **Pages selon l'activité** : en plus d'Accueil, Services et Merci (toujours là), l'IA garde jusqu'à quatre pages facultatives parmi liste avec prix (`prices`), offre du moment (`offer`), infos pratiques (`info`), chiffres clés (`numbers`), avis (`quote`) et actualité (`news`). Noms génériques, sans vocabulaire de métier.
+- **Ajouter une variante ou un type de page** : une fonction de dessin dans `StartTemplates` (paysage et portrait), son entrée dans `Kinds`, `Has`, `Name`, `Variants`, le contrôle dans `AiStarter.Fix`, la forme JSON et la règle dans `BriefSystem` / `Rules`, et `Diff` dans `AiStartView.razor`. Le test « Toutes les mises en page et tous les décors tiennent dans l'écran » couvre la nouvelle page sans autre réglage.
 
 ## Garde-fous
 
@@ -51,12 +63,14 @@ L'étape 1 des Premiers pas devient une zone de l'IA quand l'organisation y a dr
 - Les compositions créées par l'IA passent par `Compositions.Clean` comme toutes les autres.
 - Composition modifiée par l'assistant (§231) : la réponse de l'IA est fusionnée par `AiCompose.Merge` (un élément gardé garde ses autres champs, blocs reliés aux données jamais créés, images seulement par repère connu, réponse vide refusée) ; droits de la personne (« Peut utiliser » : refusé, à dupliquer) ; « Annuler » remet l'ancien document ; l'éditeur ouvert reprend la nouvelle version, l'ancienne reste dans Ctrl+Z.
 - Images d'internet : une clé Pexels de la plateforme (console), coupable par organisation ; seuls les mots qui décrivent l'image partent chez Pexels ; photos dont la description parle de personnes écartées ; téléchargement depuis `images.pexels.com` seulement, sans redirection, 15 Mo au plus ; crédit du photographe gardé sur l'image (`MediaItem.Credit`).
+- Premiers pas (§248) : rien d'inventé. Un prix inconnu s'écrit « [Prix] » ; une offre, un chiffre ou une actualité n'existent que s'ils sont annoncés ; un avis n'est gardé que s'il vient d'un site (`Sanitize` le retire pour une simple phrase). Longueurs, nombre de lignes et nombre de pages facultatives sont bornés par `Sanitize`. Les vignettes montrées à l'IA viennent du même hôte contrôlé (`WebImages.Thumb`, 2 Mo au plus).
 - Résultat de la relecture et analyses des images : une demande par image ou par relecture, jamais refaite sans changement.
 
 ## État de vérification
 
 - **Essayé avec un faux serveur Anthropic** (hors dépôt) : saisie de la clé, test de connexion, Améliorer, quota atteint, colonne par client, relecture, éditeur de compositions, analyse et recherche d'images, création de compositions, Premiers pas depuis un site (example.com), assistant (conversation gardée, 11 sortes d'actions confirmées, annulation, refus d'un écran hors ligne).
 - **Jamais essayé avec la vraie API** : réflexion désactivée + effort faible acceptés par Haiku 5.5, authentification, qualité des descriptions, des mises en page et des propositions de l'assistant, enchaînement complet d'une programmation (§227 : testé seulement par `AiAssistantTests`, sans IA), réponse en flux de l'assistant (§228), choix d'une image par l'IA et vraie banque Pexels (§229 : essayés avec un faux serveur seulement), panneau de l'assistant et reprise d'une ancienne discussion (§230 : faux serveur seulement ; jamais avec plusieurs membres de la même organisation).
+- **Écrans adaptés à l'activité (§248)** : vérifiés par `AiStartTests` seulement (28 tests : rien ne sort de la page, deux textes ne se recouvrent pas, pour toutes les variantes, décors, polices et formats). Aucun rendu regardé à l'écran ; jamais lancé avec la vraie IA ni une vraie clé Pexels ; pertinence des photos et pastilles non essayées.
 - **Jamais essayé** : bouton sous les champs des applications (AppForm), publication depuis la page Écrans (non interceptée par la relecture), vraies images, photo du site importée, action de l'assistant sur un écran en ligne.
 
 ## Pas fait

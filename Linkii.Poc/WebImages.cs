@@ -76,13 +76,13 @@ public class WebImages(JsonStore root, SecretBox box, MediaImporter importer, IC
     }
 
     /// <summary>Cherche des photos d'illustration (en français, dans le format de l'écran) et ne garde que les impersonnelles.</summary>
-    public async Task<(List<WebImage> Found, string? Error)> Search(string query, bool portrait, CancellationToken ct = default)
+    public async Task<(List<WebImage> Found, string? Error)> Search(string query, bool portrait, CancellationToken ct = default, string locale = "fr-FR")
     {
         query = Regex.Replace(query ?? "", @"\s+", " ").Trim();
         if (query.Length < 2) return (new(), "Indiquez ce que l'image doit montrer.");
         if (query.Length > 80) query = query[..80];
         if (Key() is not { } key) return (new(), Off);
-        var url = $"{Base}/v1/search?query={Uri.EscapeDataString(query)}&orientation={(portrait ? "portrait" : "landscape")}&size=medium&locale=fr-FR&per_page=20";
+        var url = $"{Base}/v1/search?query={Uri.EscapeDataString(query)}&orientation={(portrait ? "portrait" : "landscape")}&size=medium&locale={locale}&per_page=20";
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -99,6 +99,27 @@ public class WebImages(JsonStore root, SecretBox box, MediaImporter importer, IC
             log.LogInformation(e, "Recherche d'images en échec.");
             return (new(), "La banque d'images ne répond pas. Réessayez plus tard.");
         }
+    }
+
+    /// <summary>La vignette d'une photo trouvée (2 Mo au plus), pour que l'IA la regarde avant de la choisir ; null si elle ne se télécharge pas.</summary>
+    public async Task<byte[]?> Thumb(WebImage img, CancellationToken ct = default)
+    {
+        var address = img.Thumb.Length > 0 ? img.Thumb : img.File;
+        if (!Uri.TryCreate(address, UriKind.Absolute, out var u) || !AllowedImage(u)) return null;
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(8));
+            using var res = await Http.GetAsync(u, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (!res.IsSuccessStatusCode || res.Content.Headers.ContentLength > 2_000_000) return null;
+            using var ms = new MemoryStream();
+            await using var s = await res.Content.ReadAsStreamAsync(cts.Token);
+            var buf = new byte[64 * 1024];
+            int n;
+            while ((n = await s.ReadAsync(buf, cts.Token)) > 0) { ms.Write(buf, 0, n); if (ms.Length > 2_000_000) return null; }
+            return ms.ToArray();
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException && !ct.IsCancellationRequested) { return null; }
     }
 
     // ---------- Import dans la médiathèque ----------

@@ -202,6 +202,153 @@ public class AiStartTests
         Assert.Equal(2, st.Brief.Photos.Count);
     }
 
+    // ---------- §248 : variantes, décors, pages facultatives, une photo par page ----------
+
+    /// <summary>Un contenu avec toutes les pages, des textes à la longueur maximale et une photo par page.</summary>
+    static StartBrief Full(bool photos)
+    {
+        var b = Brief(photos);
+        b.Pages.Welcome.Title = "Le vrai kebab grillé au feu de bois, depuis 1998";
+        b.Pages.Welcome.Sub = "Viande marinée maison, pain cuit sur place et sauces préparées chaque matin par l'équipe.";
+        b.Pages.Services.Points = new() { "Kebab, dürüm et assiettes à emporter ou sur place", "Options végétariennes : falafel maison", "Menus du midi servis en dix minutes", "Commande par téléphone, prête à l'heure dite" };
+        b.Pages.Prices = new()
+        {
+            Kicker = "La carte", Title = "Nos classiques, faits minute",
+            Items = new() { new() { Name = "Kebab pain maison", Price = "12.50 CHF", Note = "Veau ou poulet, crudités, sauce au choix" }, new() { Name = "Dürüm galette fine", Price = "[Prix]" }, new() { Name = "Assiette kebab frites salade", Price = "19.– CHF", Note = "Avec boisson" },
+                new() { Name = "Falafel maison", Price = "11.–" }, new() { Name = "Menu enfant", Price = "9.50" }, new() { Name = "Baklava pistache", Price = "4.–", Note = "Deux pièces" } },
+        };
+        b.Pages.Offer = new() { Tag = "Offre du midi", Badge = "2 pour 1", Title = "Le deuxième dürüm offert chaque mardi midi", Sub = "Sur place ou à emporter, de 11 h 30 à 14 h, sur présentation de ce message." };
+        b.Pages.Numbers = new() { Kicker = "En chiffres", Title = "Une maison de quartier", Items = new() { new() { Value = "25 ans", Label = "au service du quartier" }, new() { Value = "1 200", Label = "kebabs servis chaque semaine" }, new() { Value = "98 %", Label = "de clients qui reviennent" } } };
+        b.Pages.Quote = new() { Text = "Le meilleur kebab de la ville, et de loin : la viande est grillée devant vous, le pain sort du four, et l'accueil est toujours aussi chaleureux après toutes ces années.", Author = "Camille, cliente depuis 2010" };
+        if (photos) b.SetPhotos(StartTemplates.PhotoKinds.ToDictionary(k => k, _ => Guid.NewGuid()));
+        return b;
+    }
+
+    public static IEnumerable<object[]> Dessins() =>
+        from portrait in new[] { false, true } from photos in new[] { false, true } from font in new[] { "Montserrat", "Oswald", "Playfair Display" } select new object[] { portrait, photos, font };
+
+    [Theory]
+    [MemberData(nameof(Dessins))]
+    public void Toutes_les_mises_en_page_et_tous_les_decors_tiennent_dans_l_ecran(bool portrait, bool photos, string font)
+    {
+        var b = Full(photos);
+        b.Font = font;
+        int w = portrait ? 1080 : 1920, h = portrait ? 1920 : 1080;
+        foreach (var decor in StartTemplates.Decors)
+            foreach (var kind in StartTemplates.Kinds)
+                for (var v = 0; v < StartTemplates.Variants(kind); v++)
+                {
+                    b.Decor = decor; b.Layouts[kind] = v;
+                    var doc = StartTemplates.Doc(b, kind, portrait, false);
+                    Assert.NotNull(Compositions.Clean(doc));
+                    var texts = new List<(int X, int Y, int W, int H, string T)>();
+                    foreach (var e in Els(doc).OfType<JsonObject>().Where(e => (string?)e["type"] is "text" or "qr" or "icon" or "widget"))
+                    {
+                        int x = (int)e["x"]!, y = (int)e["y"]!, ew = (int)e["w"]!, eh = (int)e["h"]!;
+                        Assert.True(x >= 0 && y >= 0 && x + ew <= w && y + eh <= h, $"{kind} {v} {decor} : « {e["text"] ?? e["type"]} » sort de la page ({x},{y},{ew},{eh})");
+                        if ((string?)e["type"] == "text" && ((string)e["text"]!).Length > 1 && (string?)e["text"] != "“") texts.Add((x, y, ew, eh, (string)e["text"]!));
+                    }
+                    // deux textes ne se recouvrent pas
+                    for (var i = 0; i < texts.Count; i++)
+                        for (var j = i + 1; j < texts.Count; j++)
+                        {
+                            var (p, q) = (texts[i], texts[j]);
+                            var over = p.X < q.X + q.W && q.X < p.X + p.W && p.Y < q.Y + q.H - 6 && q.Y < p.Y + p.H - 6;
+                            Assert.False(over, $"{kind} {v} {(portrait ? "portrait" : "paysage")} : « {p.T} » et « {q.T} » se recouvrent");
+                        }
+                }
+    }
+
+    [Fact]
+    public void Chaque_page_a_sa_photo_et_une_page_sans_photo_recoit_le_decor()
+    {
+        var b = Full(true);
+        Guid welcome = b.PagePhotos["welcome"], thanks = b.PagePhotos["thanks"];
+        Assert.Contains(Els(StartTemplates.Doc(b, "welcome", false, false)).OfType<JsonObject>(), e => (string?)e["media"] == welcome.ToString());
+        Assert.Contains(Els(StartTemplates.Doc(b, "thanks", false, false)).OfType<JsonObject>(), e => (string?)e["media"] == thanks.ToString());
+        Assert.Equal(6, b.Photos.Count);
+        // la photo de la page « Merci » n'a pas été trouvée : pas d'image d'une autre page à la place, le décor
+        var some = new Dictionary<string, Guid>(b.PagePhotos); some.Remove("thanks");
+        b.SetPhotos(some);
+        var page = Els(StartTemplates.Doc(b, "thanks", false, false)).OfType<JsonObject>().ToList();
+        Assert.DoesNotContain(page, e => (string?)e["type"] == "image" && (string?)e["fit"] != "contain");
+        Assert.Contains(page, e => (string?)e["type"] == "shape");
+        Assert.Null(StartTemplates.PhotoOf(b, "info"));   // une page sans photo par nature
+        var copy = b.Clone();
+        Assert.Equal(b.PagePhotos, copy.PagePhotos);
+        Assert.Equal(b.Layouts, copy.Layouts);
+    }
+
+    [Fact]
+    public void Autre_mise_en_page_change_chaque_page_et_le_decor()
+    {
+        var b = Full(true);
+        var rnd = new Random(7);
+        StartTemplates.Shuffle(b, rnd);
+        Assert.All(StartTemplates.Kinds, k => Assert.InRange(b.Layouts[k], 0, StartTemplates.Variants(k) - 1));
+        for (var i = 0; i < 20; i++)
+        {
+            var before = new Dictionary<string, int>(b.Layouts); var decor = b.Decor;
+            StartTemplates.Shuffle(b, rnd);
+            Assert.All(StartTemplates.Kinds, k => Assert.NotEqual(before[k], b.Layouts[k]));
+            Assert.NotEqual(decor, b.Decor);
+            Assert.Contains(b.Decor, StartTemplates.Decors);
+        }
+        // les variantes dessinent vraiment des pages différentes
+        b.Layouts["welcome"] = 0; var one = Els(StartTemplates.Doc(b, "welcome", false, false)).Count;
+        b.Layouts["welcome"] = 1; var two = Els(StartTemplates.Doc(b, "welcome", false, false)).OfType<JsonObject>().First(e => (string?)e["type"] == "image");
+        Assert.Equal(960, (int)two["x"]!);   // photo sur la moitié droite
+        Assert.True(one > 0);
+    }
+
+    [Fact]
+    public void Les_pages_facultatives_sont_controlees_et_limitees_a_quatre()
+    {
+        var b = Full(false);
+        b.Pages.Prices!.Items.Add(new() { Name = "Septième ligne", Price = "1.–" });
+        b.Pages.Prices.Items[0].Name = new string('x', 60);
+        b.Pages.Offer!.Badge = "Beaucoup trop long pour une pastille";
+        b.Pages.Numbers!.Items.Add(new() { Value = "4", Label = "quatrième" });
+        AiStarter.Sanitize(b);
+        Assert.Equal(6, b.Pages.Prices!.Items.Count);
+        Assert.True(b.Pages.Prices.Items[0].Name.Length <= 31);
+        Assert.True(b.Pages.Offer!.Badge.Length <= 13);
+        // six pages facultatives écrites : quatre gardées, l'avis et les chiffres partent d'abord
+        Assert.Null(b.Pages.Quote);
+        Assert.Null(b.Pages.Numbers);
+        Assert.Equal(4, StartTemplates.Optional.Count(k => StartTemplates.Has(b.Pages, k)));
+
+        var phrase = Full(false);
+        phrase.Site = ""; phrase.Pages.Numbers = null; phrase.Pages.Offer = null;
+        AiStarter.Sanitize(phrase);
+        Assert.Null(phrase.Pages.Quote);   // sans site, pas d'avis : il serait inventé
+        Assert.NotNull(phrase.Pages.Prices);
+
+        var empty = Full(false);
+        empty.Pages.Prices!.Items = new(); empty.Pages.Offer!.Title = ""; empty.Pages.Numbers!.Items = new() { new() { Value = "", Label = "rien" } };
+        AiStarter.Sanitize(empty);
+        Assert.Null(empty.Pages.Prices);
+        Assert.Null(empty.Pages.Offer);
+        Assert.Null(empty.Pages.Numbers);
+        Assert.Equal("Tarifs", StartTemplates.Name(empty.Pages, "prices", false));
+        Assert.Equal("La carte", StartTemplates.Name(Full(false).Pages, "prices", false));
+    }
+
+    [Fact]
+    public void L_IA_dit_quelle_photo_chercher_pour_chaque_page()
+    {
+        var o = (JsonObject)JsonNode.Parse("""{"images":{"welcome":{"fr":"kebab grillé","en":"grilled kebab meat"},"services":{"fr":"pain pita garni"},"info":{"fr":"horloge","en":"clock"},"thanks":{"fr":"","en":""}}}""")!;
+        var q = AiStarter.Queries(o);
+        Assert.Equal(new PhotoQuery("kebab grillé", "grilled kebab meat"), q["welcome"]);
+        Assert.Equal(new PhotoQuery("pain pita garni", "pain pita garni"), q["services"]);   // sans anglais : les mots français
+        Assert.False(q.ContainsKey("info"));     // une page sans photo
+        Assert.False(q.ContainsKey("thanks"));   // rien à chercher
+        // ancienne forme : une liste, répartie dans l'ordre des pages
+        var old = AiStarter.Queries((JsonObject)JsonNode.Parse("""{"photo_queries":["lac","forêt"]}""")!);
+        Assert.Equal("lac", old["welcome"].Fr);
+        Assert.Equal("forêt", old["services"].En);
+    }
+
     private sealed class Env : IWebHostEnvironment
     {
         public string ApplicationName { get; set; } = "Linkivi";

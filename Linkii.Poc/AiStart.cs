@@ -15,8 +15,11 @@ public sealed record SiteRead(Uri Home, string Host, int Pages, string Title, st
 /// <summary>Une image du site : adresse, texte alternatif, taille d'origine et copie réduite (JPEG en base 64) montrée à l'IA.</summary>
 public sealed record SiteImage(string Url, string Alt, int W, int H, string Jpeg);
 
-/// <summary>Choix de l'IA parmi les candidats du site (logo, photos) et recherches de photos neutres pour compléter.</summary>
-public sealed record StartPick(int? Logo, List<int> Photos, List<string> Queries)
+/// <summary>Ce qu'une page doit montrer : les mots français (nom de la photo dans la médiathèque) et la recherche anglaise (banque d'images).</summary>
+public sealed record PhotoQuery(string Fr, string En);
+
+/// <summary>Choix de l'IA parmi les candidats du site (logo, photos) et, page par page, la photo à chercher pour compléter.</summary>
+public sealed record StartPick(int? Logo, List<int> Photos, Dictionary<string, PhotoQuery> Queries)
 {
     public static readonly StartPick None = new(null, new(), new());
 }
@@ -57,7 +60,7 @@ public sealed class StartState
 /// Agit avec les droits de la personne connectée (service par session). Rien n'est publié sur un écran.
 /// </summary>
 public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, SafeHttp http, MediaImporter importer, MediaLibrary library,
-    WebImages webImages, WeatherService weather, JsonStore root, IWebHostEnvironment env, ILogger<AiStarter> log)
+    WebImages webImages, WeatherService weather, JsonStore root, ILogger<AiStarter> log)
 {
     public const int PageSeconds = 10;
     public const string ListName = "Accueil";
@@ -253,8 +256,14 @@ public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, S
         Règles :
         - Écris en français, simplement, pour être lu de loin : kicker ≤ 28 caractères, title ≤ 42, sub ≤ 80, chaque point ≤ 40, label ≤ 20, value ≤ 32, note ≤ 40, tag ≤ 16.
         - N'invente rien : pas d'horaire, d'adresse, de téléphone, de prix, de date ni de nom qui ne soient dans les informations données. Une information pratique utile mais inconnue s'écrit entre crochets pour que la personne la complète, par exemple "[Vos horaires]".
+        - Chaque texte parle de cette activité précise, avec ses mots, ses produits ou ses prestations : pas de formule passe-partout qui irait à n'importe quelle organisation.
+        - "welcome", "services" et "thanks" existent toujours. Les autres pages sont facultatives : garde seulement celles qui servent vraiment cette activité, trois au plus, et mets les autres à null.
+        - "prices" : liste avec prix, pour une activité qui vend des produits ou des prestations à un tarif (restauration, commerce, soins, services…) ; 3 à 6 lignes, name ≤ 28 caractères, price ≤ 12, note ≤ 40 (peut être ""). Les produits sont ceux des informations données, ou les plus courants pour cette activité ; un prix inconnu s'écrit "[Prix]".
+        - "offer" : une offre ou une promotion réellement annoncée ; "badge" ≤ 10 caractères (« −20 % », « 2 pour 1 », « Offert »), "" s'il n'y en a pas. null sans offre annoncée.
         - "info" : seulement des informations utiles au visiteur (horaires, adresse, accès, contact, Wi-Fi…), 1 à 3 cartes ; « icon » parmi : horloge, position, telephone, courrier, wifi, parking, accessibilite, information, calendrier. null si rien d'utile.
-        - "news" : une actualité, un événement ou une offre réellement annoncé, avec dans "link" l'adresse de la page qui en parle ; null s'il n'y en a pas.
+        - "numbers" : 2 ou 3 chiffres clés réellement donnés (« 25 ans », « 1 200 », « 98 % ») ; value ≤ 8 caractères, label ≤ 36. null sans chiffre donné.
+        - "quote" : un avis ou un témoignage réellement cité dans les informations, mot pour mot (text ≤ 200), avec son auteur ; null sinon. N'en invente jamais.
+        - "news" : une actualité ou un événement réellement annoncé, avec dans "link" l'adresse de la page qui en parle ; null s'il n'y en a pas.
         - "thanks" : une page de fin chaleureuse (« Merci de votre visite », « À bientôt »…).
         """;
 
@@ -263,11 +272,16 @@ public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, S
         Tu reçois {{{(site ? "le contenu de son site web" : "une phrase qui décrit son activité")}}}. Réponds uniquement par un objet JSON, sans commentaire autour :
         {"name":"nom de l'organisation, ou \"\"","activity":"activité en 2 à 4 mots","city":"ville ou null","goal":"ce que l'écran doit faire, en une phrase courte","tone":"ton en 2 à 4 mots",
          "font":"Montserrat","colors":{"deep":"#RRGGBB","accent":"#RRGGBB","light":"#RRGGBB"},
-         "logo":null,"photos":[],"photo_queries":["…","…","…","…"],
+         "decor":"cercles","logo":null,"photos":[],
+         "images":{"welcome":{"fr":"…","en":"…"},"services":{"fr":"…","en":"…"},"thanks":{"fr":"…","en":"…"}},
          "pages":{
           "welcome":{"kicker":"…","title":"…","sub":"…"},
           "services":{"kicker":"…","title":"…","points":["…","…","…"]},
+          "prices":{"kicker":"…","title":"…","items":[{"name":"…","price":"…","note":"…"}]},
+          "offer":{"tag":"…","badge":"…","title":"…","sub":"…"},
           "info":{"kicker":"…","title":"…","cards":[{"icon":"horloge","label":"…","value":"…","note":"…"}]},
+          "numbers":{"kicker":"…","title":"…","items":[{"value":"…","label":"…"}]},
+          "quote":{"text":"…","author":"…"},
           "news":{"tag":"…","title":"…","sub":"…","link":"https://…"},
           "thanks":{"title":"…","sub":"…"} } }
         {{{Rules}}}
@@ -275,7 +289,8 @@ public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, S
         - "colors" : {{{(site ? "celles du site (couleur de la marque, couleurs repérées)" : "des couleurs sobres et chaleureuses qui conviennent à l'activité")}}} ; "deep" très foncée pour les fonds, "light" très claire, "accent" vive.
         - "font" : une de Montserrat, Poppins, Playfair Display, Oswald, IBM Plex Sans{{{(site ? ", proche du style du site" : "")}}}.
         {{{(site ? "- \"logo\" : le numéro du logo parmi les logos possibles, null si aucun ne semble être celui de l'organisation. \"photos\" : jusqu'à 4 numéros d'images du site (tu les vois, avec leur numéro) qui sont de vraies photos d'ambiance : pas de logo, d'icône, de bannière, de capture d'écran ni de texte incrusté dans l'image ; les plus belles d'abord ; [] si aucune ne convient." : "- \"logo\" : null ; \"photos\" : [].")}}}
-        - "photo_queries" : 4 recherches de photos d'illustration neutres, en français, 2 à 4 mots (un lieu, un objet, une ambiance liés à l'activité ; jamais de personne, de visage ni de marque).
+        - "decor" : le décor des fonds, selon le ton : cercles (doux, accueillant), bandes (dynamique), arches (élégant), points (moderne, technique), cadre (sobre, institutionnel).
+        - "images" : pour chaque page parmi welcome, services, prices, offer, news, thanks que tu gardes, la photo qui l'illustrerait le mieux : un produit, un plat, un objet, un lieu ou une ambiance propres à cette activité, concret et reconnaissable, différent d'une page à l'autre ; jamais de personne, de visage ni de marque, jamais de paysage sans rapport avec l'activité. "fr" : 2 à 4 mots français ; "en" : les mêmes en anglais, pour la banque d'images.
         """;
 
     private static string Facts(SiteRead s)
@@ -338,7 +353,10 @@ public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, S
             Site = site?.Host ?? "",
         };
         Sanitize(b);
-        var pick = new StartPick(Int(o["logo"], site?.Logos.Count ?? 0), Ints(o["photos"], site?.Images.Count ?? 0), Strings(o["photo_queries"]));
+        // le décor suit le ton (choix de l'IA) ; les mises en page sont tirées au sort : deux écrans ne se ressemblent pas
+        StartTemplates.Shuffle(b, Random.Shared);
+        if (Str(o, "decor") is { } decor && StartTemplates.Decors.Contains(decor.Trim().ToLowerInvariant())) b.Decor = decor.Trim().ToLowerInvariant();
+        var pick = new StartPick(Int(o["logo"], site?.Logos.Count ?? 0), Ints(o["photos"], site?.Images.Count ?? 0), Queries(o));
         return (b, pick, null);
     }
 
@@ -346,7 +364,8 @@ public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, S
         Tu modifies les textes et les couleurs d'un écran d'affichage dynamique préparé pour une organisation. Tu reçois le contenu actuel en JSON
         (« pages » en français, « en » en anglais s'il existe) puis la demande. Réponds uniquement par un objet JSON, sans commentaire autour :
         {"font":"…","colors":{"deep":"#RRGGBB","accent":"#RRGGBB","light":"#RRGGBB"},"pages":{…même forme…},"en":{…même forme, ou null…},"summary":"ce que tu as changé, en une phrase"}
-        Fais exactement ce qui est demandé et garde tout le reste à l'identique. Pour retirer une page facultative (info ou news), mets-la à null.
+        Fais exactement ce qui est demandé et garde tout le reste à l'identique. Pour retirer une page facultative (prices, offer, info, numbers, quote ou news), mets-la à null ;
+        une page facultative absente (null) peut être ajoutée si la demande donne de quoi l'écrire, dans la forme décrite par les règles.
         Si « en » existe, applique la même modification aux textes anglais.
         {{Rules}}
         """;
@@ -427,6 +446,36 @@ public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, S
             p.News.Link = b.Site.Length > 0 ? StartTemplates.SafeLink(p.News.Link) : null;   // sans site, pas de lien inventé
             if (p.News.Title.Length == 0) p.News = null;
         }
+        if (p.Prices != null)
+        {
+            p.Prices.Kicker = C(p.Prices.Kicker, 30); p.Prices.Title = C(p.Prices.Title, 44);
+            p.Prices.Items = (p.Prices.Items ?? new()).Where(x => x != null).Select(x => new StartPrice { Name = C(x.Name, 30), Price = C(x.Price, 14), Note = C(x.Note, 44) })
+                .Where(x => x.Name.Length > 0).Take(6).ToList();
+            if (p.Prices.Items.Count == 0 || p.Prices.Title.Length == 0) p.Prices = null;
+        }
+        if (p.Offer != null)
+        {
+            p.Offer.Tag = C(p.Offer.Tag, 18); p.Offer.Badge = C(p.Offer.Badge, 12); p.Offer.Title = C(p.Offer.Title, 60); p.Offer.Sub = C(p.Offer.Sub, 90);
+            if (p.Offer.Title.Length == 0) p.Offer = null;
+        }
+        if (p.Numbers != null)
+        {
+            p.Numbers.Kicker = C(p.Numbers.Kicker, 30); p.Numbers.Title = C(p.Numbers.Title, 44);
+            p.Numbers.Items = (p.Numbers.Items ?? new()).Where(x => x != null).Select(x => new StartNumber { Value = C(x.Value, 9), Label = C(x.Label, 40) })
+                .Where(x => x.Value.Length > 0).Take(3).ToList();
+            if (p.Numbers.Items.Count == 0) p.Numbers = null;
+        }
+        if (p.Quote != null)
+        {
+            p.Quote.Text = C(p.Quote.Text, 220); p.Quote.Author = C(p.Quote.Author, 40);
+            if (p.Quote.Text.Length == 0 || b.Site.Length == 0) p.Quote = null;   // sans site, pas d'avis inventé
+        }
+        // quatre pages facultatives au plus : les moins utiles au visiteur partent d'abord
+        foreach (var k in new[] { "quote", "numbers", "offer", "news", "prices" })
+        {
+            if (StartTemplates.Optional.Count(o => StartTemplates.Has(p, o)) <= StartTemplates.MaxOptional) break;
+            switch (k) { case "quote": p.Quote = null; break; case "numbers": p.Numbers = null; break; case "offer": p.Offer = null; break; case "news": p.News = null; break; default: p.Prices = null; break; }
+        }
         p.Thanks.Title = C(p.Thanks.Title, 42); p.Thanks.Sub = C(p.Thanks.Sub, 64);
         if (p.Thanks.Title.Length == 0) p.Thanks.Title = "Merci de votre visite";
         if (p.Thanks.Sub.Length == 0 && b.Site.Length > 0) p.Thanks.Sub = b.Site;
@@ -461,8 +510,24 @@ public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, S
     private static List<int> Ints(JsonNode? n, int count) =>
         n is JsonArray a ? a.Select(x => Int(x, count)).OfType<int>().Distinct().Take(6).ToList() : new();
 
-    private static List<string> Strings(JsonNode? n) =>
-        n is JsonArray a ? a.OfType<JsonValue>().Select(v => v.TryGetValue<string>(out var s) ? StartTemplates.Cut(s, 60) : "").Where(s => s.Length > 1).Take(4).ToList() : new();
+    /// <summary>La photo à chercher pour chaque page (« images » ; l'ancienne forme « photo_queries », une liste, est répartie dans l'ordre des pages).</summary>
+    public static Dictionary<string, PhotoQuery> Queries(JsonObject o)
+    {
+        var q = new Dictionary<string, PhotoQuery>();
+        if (o["images"] is JsonObject im)
+            foreach (var k in StartTemplates.PhotoKinds)
+            {
+                if (im[k] is not JsonObject one) continue;
+                string fr = StartTemplates.Cut(Str(one, "fr"), 60), en = StartTemplates.Cut(Str(one, "en"), 60);
+                if (fr.Length > 1 || en.Length > 1) q[k] = new PhotoQuery(fr.Length > 1 ? fr : en, en.Length > 1 ? en : fr);
+            }
+        else if (o["photo_queries"] is JsonArray a)
+        {
+            var list = a.OfType<JsonValue>().Select(v => v.TryGetValue<string>(out var s) ? StartTemplates.Cut(s, 60) : "").Where(s => s.Length > 1).ToList();
+            for (var i = 0; i < list.Count && i < StartTemplates.PhotoKinds.Length; i++) q[StartTemplates.PhotoKinds[i]] = new PhotoQuery(list[i], list[i]);
+        }
+        return q;
+    }
 
     // ---------- 3. Logo et photos ----------
 
@@ -497,29 +562,108 @@ public sealed class AiStarter(TenantStore store, AppService svc, AiService ai, S
     /// <summary>Photos neutres d'internet (sans personne), si la plateforme et l'organisation y ont droit.</summary>
     public bool CanSearchWeb => webImages.On(store.ClientId);
 
-    public async Task<List<Guid>> WebPhotos(IEnumerable<string> queries, int max, bool portrait, CancellationToken ct)
+    public const int Candidates = 5;
+
+    /// <summary>
+    /// Pour chaque page, des photos candidates de la banque d'images (recherche anglaise, puis française si rien), classées par l'IA qui les regarde :
+    /// la meilleure d'abord, celles qui n'illustrent pas l'activité écartées. Si l'IA ne répond pas, l'ordre de la banque est gardé.
+    /// </summary>
+    public async Task<Dictionary<string, List<WebImage>>> FindPhotos(StartBrief b, IReadOnlyDictionary<string, PhotoQuery> queries, IEnumerable<string> kinds, CancellationToken ct)
     {
-        var got = new List<Guid>();
-        if (!CanSearchWeb) return got;
-        foreach (var q in queries)
+        var found = new Dictionary<string, List<WebImage>>();
+        if (!CanSearchWeb) return found;
+        foreach (var k in kinds)
         {
-            if (got.Count >= max) break;
-            var (item, err) = await webImages.FindAndImport(store.ClientId, q, portrait, store.AreaId, store.UserId, ct);
-            if (item != null && !got.Contains(item.Id)) got.Add(item.Id);
-            else if (err != null) log.LogInformation("Photo d'internet non trouvée pour « {Query} » : {Error}", q, err);
+            if (!queries.TryGetValue(k, out var q)) continue;
+            var (list, err) = await webImages.Search(q.En, false, ct, "en-US");
+            if (list.Count == 0 && q.Fr != q.En) (list, err) = await webImages.Search(q.Fr, false, ct);
+            if (err != null) log.LogInformation("Photos d'internet non trouvées pour « {Query} » : {Error}", q.En, err);
+            // une même photo ne sert pas à deux pages
+            list = list.Where(i => !found.Values.Any(o => o.Any(x => x.Id == i.Id))).Take(Candidates).ToList();
+            if (list.Count > 0) found[k] = list;
         }
-        return got;
+        if (found.Count == 0) return found;
+        try { return await Rank(b, queries, found, ct); }
+        catch (Exception e) when (!ct.IsCancellationRequested && e is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            log.LogInformation(e, "Photos non classées par l'IA : ordre de la banque d'images gardé.");
+            return found;
+        }
     }
 
-    /// <summary>Images d'exemple de Linkivi (paysages), reprises si elles sont déjà dans la médiathèque.</summary>
-    public async Task<List<Guid>> SamplePhotos(int max, CancellationToken ct)
+    private static string RankSystem => """
+        Tu choisis les photos d'un écran d'affichage dynamique préparé pour une organisation. Pour chaque page, tu vois des photos candidates numérotées.
+        Réponds uniquement par un objet JSON, sans commentaire autour : pour chaque page, les numéros des photos qui conviennent, la meilleure d'abord,
+        par exemple {"welcome":[2,0],"services":[1],"thanks":[]}.
+        - Une photo convient si elle montre clairement ce qui est demandé pour la page et correspond à l'activité : écarte celles qui sont hors sujet,
+          trompeuses (un autre produit, un autre métier), de mauvaise qualité, chargées de texte ou qui montrent une personne reconnaissable.
+        - Préfère une photo nette, lumineuse, où un texte pourra se lire par-dessus. Une liste vide vaut mieux qu'une photo hors sujet.
+        """;
+
+    private async Task<Dictionary<string, List<WebImage>>> Rank(StartBrief b, IReadOnlyDictionary<string, PhotoQuery> queries, Dictionary<string, List<WebImage>> found, CancellationToken ct)
     {
-        var got = new List<Guid>();
-        foreach (var (file, name) in GettingStarted.Samples.Take(max))
+        var seen = await Task.WhenAll(found.SelectMany(f => f.Value.Select((img, i) => (f.Key, i, img))).Select(async c => (c.Key, c.i, Jpeg: Small(await webImages.Thumb(c.img, ct)))));
+        var blocks = new List<ContentBlockParam> { new TextBlockParam { Text = $"Activité : {b.Activity}{(b.Name.Length > 0 ? " (" + b.Name + ")" : "")}. Objectif de l'écran : {b.Goal}" } };
+        var shown = 0;
+        foreach (var (k, list) in found)
         {
-            if (store.Read(d => d.Media.FirstOrDefault(m => m.Name == name && m.Type == "image" && m.FileName != null && !m.Off)?.Id) is { } have) { got.Add(have); continue; }
-            var r = await importer.ImportFile(Path.Combine(env.WebRootPath, "samples", "premiers-pas", file), name + ".jpg", store.ClientId, store.AreaId, store.UserId, ct);
-            if (r.Item != null) got.Add(r.Item.Id);
+            blocks.Add(new TextBlockParam { Text = $"Page « {k} » — la photo doit montrer : {queries[k].Fr}" });
+            foreach (var c in seen.Where(x => x.Key == k && x.Jpeg != null).OrderBy(x => x.i))
+            {
+                blocks.Add(new TextBlockParam { Text = $"{k} {c.i}" + (list[c.i].Alt.Length > 0 ? " · " + StartTemplates.Cut(list[c.i].Alt, 90) : "") });
+                blocks.Add(new ImageBlockParam { Source = new Base64ImageSource { Data = c.Jpeg!, MediaType = MediaType.ImageJpeg } });
+                shown++;
+            }
+        }
+        if (shown == 0) return found;
+        blocks.Add(new TextBlockParam { Text = "Réponds par l'objet JSON demandé." });
+        var r = await ai.Complete(store.ClientId, "compose", RankSystem, new UserMessageParam { Content = blocks }, 400, ct);
+        if (!r.Ok || ParseObject(r.Text) is not { } o) return found;
+        var ranked = new Dictionary<string, List<WebImage>>();
+        foreach (var (k, list) in found)
+        {
+            if (o[k] is not JsonArray) { ranked[k] = list; continue; }   // page oubliée dans la réponse : ordre de la banque
+            var order = Ints(o[k], list.Count);
+            if (order.Count > 0) ranked[k] = order.Select(i => list[i]).ToList();
+        }
+        return ranked;
+    }
+
+    /// <summary>Copie réduite (384 px, JPEG en base 64) d'une image téléchargée, pour la montrer à l'IA.</summary>
+    private static string? Small(byte[]? bytes)
+    {
+        if (bytes == null) return null;
+        try
+        {
+            using var bmp = SKBitmap.Decode(bytes);
+            if (bmp == null) return null;
+            var k = Math.Min(1, 384.0 / Math.Max(bmp.Width, bmp.Height));
+            using var small = bmp.Resize(new SKImageInfo(Math.Max(1, (int)(bmp.Width * k)), Math.Max(1, (int)(bmp.Height * k))), SKFilterQuality.Medium);
+            if (small == null) return null;
+            using var data = SKImage.FromBitmap(small).Encode(SKEncodedImageFormat.Jpeg, 70);
+            return Convert.ToBase64String(data.ToArray());
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>
+    /// Importe, pour chaque page, la meilleure photo pas encore montrée (<paramref name="shown"/> : identifiants déjà pris, complété ici).
+    /// Sert à la première préparation puis à « Autres photos » ; une page sans autre candidate n'est pas rendue.
+    /// </summary>
+    public async Task<Dictionary<string, Guid>> ImportNext(IReadOnlyDictionary<string, List<WebImage>> ranked, IReadOnlyDictionary<string, PhotoQuery> queries, HashSet<string> shown, CancellationToken ct)
+    {
+        var got = new Dictionary<string, Guid>();
+        foreach (var k in StartTemplates.PhotoKinds)
+        {
+            if (!ranked.TryGetValue(k, out var list)) continue;
+            foreach (var img in list.Where(i => !shown.Contains(i.Id)).ToList())
+            {
+                shown.Add(img.Id);
+                var name = queries.TryGetValue(k, out var q) && q.Fr.Length > 1 ? char.ToUpper(q.Fr[0]) + q.Fr[1..] : "Photo";
+                var (item, err) = await webImages.Import(store.ClientId, img, name, store.AreaId, store.UserId, ct);
+                if (item != null) { got[k] = item.Id; break; }
+                log.LogInformation("Photo d'internet non importée pour « {Kind} » : {Error}", k, err);
+            }
         }
         return got;
     }

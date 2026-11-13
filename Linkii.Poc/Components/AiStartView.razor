@@ -104,6 +104,7 @@ else
                         <div class="pa-a">
                             <div class="pa-aw">@Av Assistant</div>
                             <p><b>Votre liste « @ListName » est prête.</b> @(st.Brief.Logo != null ? "Elle tourne déjà dans l'aperçu, avec votre logo, vos couleurs et vos photos." : "Elle tourne déjà dans l'aperçu. Envoyez-moi votre logo et je l'ajoute partout.")</p>
+                            @if (st.Brief.Photos.Count == 0) { <p>Je n'ai pas trouvé de photo qui montre votre activité : plutôt qu'une image hors sujet, les pages sont à vos couleurs. Envoyez-moi vos photos et je les place.</p> }
                             @if (HasBrackets) { <p>Complétez ce qui est entre crochets (par exemple vos horaires) : dites-le-moi ici, ou retouchez la page ensuite.</p> }
                             <p>Rien n'est encore diffusé. Envie de changer quelque chose ? Dites-le simplement.</p>
                             <div class="pa-sugg">
@@ -111,6 +112,9 @@ else
                                 <button type="button" disabled="@busy" @onclick='() => Adjust("short")'><Ico Name="minus" Size="14" /> Plus court</button>
                                 <button type="button" disabled="@busy" @onclick='() => Adjust("en")'><Ico Name="globe" Size="14" /> @(st.Bilingual ? "Sans l'anglais" : "Aussi en anglais")</button>
                                 <button type="button" disabled="@busy" @onclick='() => Adjust("portrait")'><Ico Name="phone" Size="14" /> @(st.Portrait ? "Revenir au paysage" : "Version portrait")</button>
+                                <button type="button" disabled="@busy" @onclick='() => Adjust("layout")'><Ico Name="grid" Size="14" /> Autre mise en page</button>
+                                @if (ranked.Count > 0) { <button type="button" disabled="@busy" @onclick='() => Adjust("photos")'><Ico Name="refresh" Size="14" /> Autres photos</button> }
+                                <label class="pa-sugg-l @(busy ? "off" : "")" for="pa-photos"><Ico Name="images" Size="14" /> Ajouter mes photos</label>
                                 @if (st.Brief.Logo == null) { <label class="pa-sugg-l @(busy ? "off" : "")" for="pa-logo"><Ico Name="image" Size="14" /> Ajouter mon logo</label> }
                             </div>
                         </div>
@@ -142,6 +146,7 @@ else
                         <button type="submit" class="pa-send" aria-label="Envoyer" disabled="@(!built || busy || say.Trim().Length < 2)"><Ico Name="arrow-up" Size="17" /></button>
                     </form>
                     <InputFile id="pa-logo" class="pa-hidden" accept="image/*" OnChange="LogoPicked" />
+                    <InputFile id="pa-photos" class="pa-hidden" accept="image/*" multiple OnChange="PhotosPicked" />
                     <div class="pa-cfn"><span>Chaque modification s'annule d'un clic.</span><span>@(AiTrial ? "Inclus dans votre essai" : "Assistant Linkivi")</span></div>
                 </div>
             </div>
@@ -210,7 +215,7 @@ else
                                             <div class="row"><small>Ton</small><b>@st.Brief.Tone</b></div>
                                             <div class="row rc"><small>Couleurs</small><span class="sw">@Swatches</span></div>
                                             <div class="pics">@for (var i = 0; i < 4; i++) { var p = i < Photos.Count ? Photos[i] : (Guid?)null; <i style="@(p is { } pp ? $"--im:url('{Thumb(pp, 320)}')" : "")"></i> }</div>
-                                            <div class="pex">@(samples ? "Images d'exemple Linkivi, à remplacer par les vôtres" : "Photos libres de droits · sans personne reconnaissable")</div>
+                                            <div class="pex">@(Done(3) && Photos.Count == 0 ? "Aucune photo trouvée pour votre activité : envoyez les vôtres" : "Photos libres de droits · sans personne reconnaissable")</div>
                                         }
                                         else { <div class="row r0"><small>Votre demande</small><b>@Ask</b></div> }
                                     </div>
@@ -277,7 +282,10 @@ else
     private StartState st = new();
     private SiteRead? site;
     private StartPick pick = StartPick.None;
-    private bool isSite, running, built, busy, samples, disposed, tvDirty, readyDirty, scroll;
+    private bool isSite, running, built, busy, disposed, tvDirty, readyDirty, scroll;
+    /// <summary>Photos d'internet candidates de chaque page, classées par l'IA, et celles déjà montrées (« Autres photos » prend les suivantes).</summary>
+    private Dictionary<string, List<WebImage>> ranked = new();
+    private readonly HashSet<string> shown = new();
     private string? failure;
     private string tvMode = "read", view = "build", say = "";
     private Guid? writing, chatId;
@@ -321,7 +329,7 @@ else
     {
         1 => isSite ? "Je lis votre site" : "Je comprends votre besoin",
         2 => isSite ? "Je reprends votre logo et vos couleurs" : "Je vous propose des couleurs",
-        3 => isSite ? "Je choisis vos photos" : "Je cherche des photos sans personne",
+        3 => isSite ? "Je choisis vos photos" : "Je cherche des photos de votre activité",
         4 => "J'écris vos pages",
         5 => st.Brief.City is { } city ? (st.Weather != null || steps[4].State == "go" ? $"J'ajoute l'heure et la météo de {city}" : $"J'ajoute l'heure de {city}") : "Heure et météo",
         _ => $"Je monte votre liste « {ListName} »",
@@ -346,7 +354,7 @@ else
             case 3:
                 <div class="det">
                     <span class="ths">@foreach (var p in Photos.Take(4)) { <i style="background-image:url('@Thumb(p, 120)')"></i> }</span>
-                    <span>@(samples ? "images d'exemple, à remplacer par les vôtres" : $"{Photos.Count} photo{(Photos.Count > 1 ? "s" : "")}{(isSite && s.Note != "web" ? " de votre site" : " libres de droits")}, rangée{(Photos.Count > 1 ? "s" : "")} dans la médiathèque")</span>
+                    <span>@(Photos.Count == 0 ? "aucune photo ne montre votre activité : envoyez-moi les vôtres" : $"{Photos.Count} photo{(Photos.Count > 1 ? "s" : "")}{(s.Note == "site" ? " de votre site" : s.Note == "mix" ? " de votre site et libres de droits" : " libres de droits, choisies page par page")}, rangée{(Photos.Count > 1 ? "s" : "")} dans la médiathèque")</span>
                 </div>
                 break;
             case 4:
@@ -417,13 +425,25 @@ else
             Ok(2);
 
             at = 3; Go(3);
-            var photos = site != null ? await Starter.SitePhotos(site, pick, 4, ct) : new List<Guid>();
-            var fromSite = photos.Count;
-            if (photos.Count < 2) photos.AddRange(await Starter.WebPhotos(pick.Queries, 4 - photos.Count, false, ct));
-            if (photos.Count == 0) { photos.AddRange(await Starter.SamplePhotos(4, ct)); samples = true; }
-            st.Brief.Photos = photos;
+            // une photo par page : celles du site d'abord, puis, pour les pages qui restent, des photos d'internet que l'IA regarde avant de les garder.
+            // Sans photo qui convienne, la page garde son décor : jamais d'image sans rapport avec l'activité.
+            var kinds = StartTemplates.PhotoKinds.Where(k => StartTemplates.Has(st.Brief.Pages, k)).ToList();
+            var byPage = new Dictionary<string, Guid>();
+            if (site != null)
+            {
+                var own = await Starter.SitePhotos(site, pick, 4, ct);
+                for (var i = 0; i < own.Count && i < kinds.Count; i++) byPage[kinds[i]] = own[i];
+            }
+            var fromSite = byPage.Count;
+            var rest = kinds.Where(k => !byPage.ContainsKey(k)).ToList();
+            if (rest.Count > 0 && Starter.CanSearchWeb)
+            {
+                ranked = await Starter.FindPhotos(st.Brief, pick.Queries, rest, ct);
+                foreach (var (k, id) in await Starter.ImportNext(ranked, pick.Queries, shown, ct)) byPage[k] = id;
+            }
+            st.Brief.SetPhotos(byPage);
             Reload();
-            Ok(3, fromSite < photos.Count && !samples ? "web" : null);
+            Ok(3, fromSite == 0 ? "web" : fromSite == byPage.Count ? "site" : "mix");
             await StepChanged.InvokeAsync(2);
             await Task.Delay(600, ct);
 
@@ -509,7 +529,7 @@ else
     {
         cts = new CancellationTokenSource();
         foreach (var s in steps) { s.State = "wait"; s.Note = null; }
-        st = new StartState(); site = null; pick = StartPick.None; failure = null; samples = false; tvMode = "read"; writing = null;
+        st = new StartState(); site = null; pick = StartPick.None; failure = null; ranked = new(); shown.Clear(); tvMode = "read"; writing = null;
         _ = Run();
     }
 
@@ -539,6 +559,8 @@ else
             "short" => "Plus court",
             "en" => st.Bilingual ? "Sans l'anglais" : "Aussi en anglais",
             "portrait" => st.Portrait ? "Revenir au paysage" : "Version portrait",
+            "layout" => "Autre mise en page",
+            "photos" => "Autres photos",
             _ => text ?? "",
         };
         msgs.Add(new Msg { Mine = true, Text = ask });
@@ -591,6 +613,23 @@ else
                     focus = 1;
                     html = "Chaque page est maintenant suivie de sa <b>version anglaise</b>. Les traductions se retouchent ensuite une à une, comme toute composition.";
                     receipt = $"{st.EnPages.Count} pages en anglais ajoutées";
+                    break;
+                case "layout":
+                    StartTemplates.Shuffle(st.Brief, Random.Shared);
+                    Starter.Apply(st);
+                    html = "Voici une <b>autre mise en page</b> : mêmes textes et mêmes photos, disposés autrement, avec un autre décor.";
+                    receipt = "Mise en page changée";
+                    break;
+                case "photos":
+                    var next = await Starter.ImportNext(ranked, pick.Queries, shown, ct);
+                    if (next.Count == 0) { error = "Je n'ai pas d'autre photo qui convienne à votre activité. Envoyez-moi les vôtres : je les place sur les pages."; break; }
+                    var photos = new Dictionary<string, Guid>(st.Brief.PagePhotos);
+                    foreach (var (k, id) in next) photos[k] = id;
+                    st.Brief.SetPhotos(photos);
+                    Starter.Apply(st);
+                    focus = Math.Max(0, st.Order().IndexOf(st.Pages.GetValueOrDefault(next.Keys.First())));
+                    html = next.Count > 1 ? $"J'ai changé la photo de <b>{next.Count} pages</b>." : $"J'ai changé la photo de la page « {Enc(StartTemplates.Name(st.Brief.Pages, next.Keys.First(), false))} ».";
+                    receipt = next.Count > 1 ? $"{next.Count} photos changées" : "Photo changée";
                     break;
                 case "portrait":
                     st.Portrait = !st.Portrait; Starter.Apply(st);
@@ -647,6 +686,36 @@ else
         scroll = true;
     }
 
+    /// <summary>Les photos de la personne : rangées dans la médiathèque puis posées sur les pages, dans l'ordre (elles reviennent s'il y a plus de pages que de photos).</summary>
+    private async Task PhotosPicked(InputFileChangeEventArgs e)
+    {
+        if (!built || busy) return;
+        var picked = e.GetMultipleFiles(6);
+        if (picked.Count == 0) return;
+        msgs.Add(new Msg { Mine = true, Text = picked.Count > 1 ? $"Mes photos : {picked.Count} fichiers" : "Ma photo : " + picked[0].Name });
+        busy = true; scroll = true;
+        StateHasChanged();
+        var before = st.Save();
+        var mine = new List<Guid>();
+        string? error = null;
+        foreach (var f in picked)
+        {
+            var r = await Importer.Import(f, Store.ClientId, null, cts.Token, Store.AreaId, null, Store.UserId);
+            if (r.Item is { Type: "image" } img) mine.Add(img.Id); else error = r.Error ?? "Un fichier n'est pas une image.";
+        }
+        busy = false;
+        if (mine.Count == 0) { msgs.Add(new Msg { Html = (MarkupString)Enc(error ?? "Ces fichiers ne sont pas des images."), Failed = true }); scroll = true; return; }
+        var kinds = StartTemplates.PhotoKinds.Where(k => StartTemplates.Has(st.Brief.Pages, k)).ToList();
+        var photos = new Dictionary<string, Guid>();
+        for (var i = 0; i < kinds.Count; i++) photos[kinds[i]] = mine[i % mine.Count];
+        st.Brief.SetPhotos(photos);
+        Starter.Apply(st);
+        msgs.Add(new Msg { Html = (MarkupString)(mine.Count > 1 ? $"Vos <b>{mine.Count} photos</b> sont maintenant sur les pages, à la place des miennes." : "Votre photo est maintenant sur les pages, à la place des miennes."), Receipt = mine.Count > 1 ? $"{mine.Count} photos ajoutées" : "Photo ajoutée", Undo = before });
+        tvAt = 0; NewToken(); Reload();
+        chatId = Starter.SaveChat(chatId, "Mes photos", "Photos de la personne posées sur les pages.", new[] { (mine.Count > 1 ? $"{mine.Count} photos ajoutées" : "Photo ajoutée", "fait") });
+        scroll = true;
+    }
+
     private sealed record Change(string Kind, string Old, string New);
 
     /// <summary>Textes changés entre deux contenus, page par page (les deux premiers sont montrés avant / après).</summary>
@@ -656,7 +725,11 @@ else
         {
             foreach (var t in new[] { p.Welcome.Kicker, p.Welcome.Title, p.Welcome.Sub }) yield return ("welcome", t);
             foreach (var t in new[] { p.Services.Kicker, p.Services.Title }.Concat(p.Services.Points)) yield return ("services", t);
+            if (p.Prices != null) foreach (var t in new[] { p.Prices.Kicker, p.Prices.Title }.Concat(p.Prices.Items.SelectMany(c => new[] { c.Name, c.Price, c.Note }))) yield return ("prices", t);
+            if (p.Offer != null) foreach (var t in new[] { p.Offer.Tag, p.Offer.Badge, p.Offer.Title, p.Offer.Sub }) yield return ("offer", t);
             if (p.Info != null) foreach (var t in new[] { p.Info.Kicker, p.Info.Title }.Concat(p.Info.Cards.SelectMany(c => new[] { c.Label, c.Value, c.Note }))) yield return ("info", t);
+            if (p.Numbers != null) foreach (var t in new[] { p.Numbers.Kicker, p.Numbers.Title }.Concat(p.Numbers.Items.SelectMany(c => new[] { c.Value, c.Label }))) yield return ("numbers", t);
+            if (p.Quote != null) foreach (var t in new[] { p.Quote.Text, p.Quote.Author }) yield return ("quote", t);
             if (p.News != null) foreach (var t in new[] { p.News.Tag, p.News.Title, p.News.Sub }) yield return ("news", t);
             foreach (var t in new[] { p.Thanks.Title, p.Thanks.Sub }) yield return ("thanks", t);
         }
