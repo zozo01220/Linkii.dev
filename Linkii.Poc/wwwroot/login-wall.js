@@ -23,7 +23,7 @@
         var wall = stage.querySelector('.lw-wall'), r = stage.getBoundingClientRect();
         if (!wall || !r.width || !r.height) return;
         var x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
-        wall.style.setProperty('--ry', (20 + x * 10) + 'deg');
+        wall.style.setProperty('--ry', (-20 + x * 10) + 'deg');
         wall.style.setProperty('--rx', (5 - y * 7) + 'deg');
         tilted = wall;
     });
