@@ -17,37 +17,41 @@
 }
 else
 {
-    @* Page en deux parties : connexion par e-mail à gauche, connexion rapide (Microsoft, Google, LinkedIn, GitHub) dans un panneau à droite.
+    @* Page pleine largeur (maquette login-mur-ecrans.html) : mur d'écrans vivant à gauche, connexion à droite (Microsoft et Google, puis e-mail).
        La création d'un espace s'ouvre dans une fenêtre par-dessus (?signup=1) ; on la ferme en revenant sur /login. *@
     var anySso = ShowGoogle || ShowMicrosoft || ShowLinkedIn || ShowGitHub;
-    <div class="auth-split @(anySso ? "with-side" : "")" inert="@(signup || playerOpen)">
-        <div class="split-main">
-            <h1>Bon retour</h1>
-            <p class="lead">Connectez-vous à votre espace @Host.DisplayName.</p>
-            @if (ssoError != null && !signup) { <div class="err">@ssoError</div> }
+    <div class="auth-split" inert="@(signup || playerOpen)">
+        <LoginWall />
+        <div class="lg-main">
+            <div class="lg-form">
+                <h1>Connexion</h1>
+                <p class="lead">Accédez à votre espace @Host.DisplayName.</p>
+                @if (ssoError != null && !signup) { <div class="err">@ssoError</div> }
 
-            <EditForm Model="Credentials" FormName="login" OnValidSubmit="DoLogin" method="post" class="auth-form">
-                <label>E-mail</label>
-                <InputText @bind-Value="Credentials!.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
-                <label>Mot de passe</label>
-                <InputText @bind-Value="Credentials.Password" type="password" autocomplete="current-password" />
-                @if (error != null && !signup) { <div class="err">@error</div> }
-                <button class="btn" type="submit">Se connecter</button>
-            </EditForm>
-            @if (Host.AllowsSignupWith(SignupSources.Email))
-            {
-                <p class="auth-alt left">Pas encore d'espace ? <a href="/login?signup=1@(trialCode != null ? "&code=" + Uri.EscapeDataString(trialCode) : "")">Créer un espace</a></p>
-            }
-            <p class="auth-alt left"><a class="auth-player-link" href="/login?player=1"><Ico Name="monitor-down" Size="16" /> Installer un player</a></p>
+                @if (anySso)
+                {
+                    <SsoButtons Mode="login" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" WithLinkedIn="@ShowLinkedIn" WithGitHub="@ShowGitHub" />
+                    <div class="auth-or">ou avec votre e-mail</div>
+                }
+
+                <EditForm Model="Credentials" FormName="login" OnValidSubmit="DoLogin" method="post" class="auth-form">
+                    <label>E-mail</label>
+                    <InputText @bind-Value="Credentials!.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
+                    <label>Mot de passe</label>
+                    <InputText @bind-Value="Credentials.Password" type="password" autocomplete="current-password" />
+                    @if (error != null && !signup) { <div class="err">@error</div> }
+                    <button class="btn" type="submit">Se connecter</button>
+                </EditForm>
+                @if (Host.AllowsSignupWith(SignupSources.Email))
+                {
+                    <p class="auth-alt left">Pas encore d'espace ? <a href="/login?signup=1@(trialCode != null ? "&code=" + Uri.EscapeDataString(trialCode) : "")">Créer un espace</a></p>
+                }
+            </div>
+            <div class="lg-foot">
+                <a class="auth-player-link" href="/login?player=1"><Ico Name="monitor-down" Size="16" /> Installer un player</a>
+                <span>Windows · Android · Linux</span>
+            </div>
         </div>
-        @if (anySso)
-        {
-            <aside class="split-side" aria-label="Connexion rapide">
-                <h2>Connexion rapide</h2>
-                <p>@(Host.AllowsSignup ? "Connectez-vous avec un compte que vous avez déjà. Pas encore d'espace ? Il est créé en une étape." : "Connectez-vous avec un compte que vous avez déjà.")</p>
-                <SsoButtons Mode="login" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" WithLinkedIn="@ShowLinkedIn" WithGitHub="@ShowGitHub" />
-            </aside>
-        }
     </div>
 
     @if (signup)
@@ -197,8 +201,10 @@ else
     private bool Offered(string p) => (Sso.IsConfigured(p) || Env.IsDevelopment()) && Host is { } h && (h.AllowsSignupWith(p) || usedProviders.Contains(p));
     private bool ShowGoogle => Offered(SignupSources.Google);
     private bool ShowMicrosoft => Offered(SignupSources.Microsoft);
-    private bool ShowLinkedIn => Offered(SignupSources.LinkedIn);
-    private bool ShowGitHub => Offered(SignupSources.GitHub);
+    // LinkedIn et GitHub ne sont plus proposés sur la page de connexion. Leur bouton ne reste que si des personnes de ce revendeur
+    // se connectent déjà ainsi : sans lui, elles n'auraient plus aucun moyen d'entrer.
+    private bool ShowLinkedIn => Offered(SignupSources.LinkedIn) && usedProviders.Contains(SignupSources.LinkedIn);
+    private bool ShowGitHub => Offered(SignupSources.GitHub) && usedProviders.Contains(SignupSources.GitHub);
 
     public class LoginModel
     {
