@@ -913,6 +913,10 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public DateTime? RepairUtc { get; set; }
     public bool DeviceOwner { get; set; }          // Android : l'application est propriétaire de l'appareil (mise en service dédiée) : elle peut le redémarrer
     public DateTime? PoweredOffUtc { get; set; }   // extinction demandée depuis le back-office : pas d'alerte « hors ligne » jusqu'au retour de l'écran
+    /// <summary>Localisation pour la carte de l'admin (super-administrateur seulement) : auto (pays déduit de l'IP, par défaut), manual (pays choisi) ou off. Seul le pays est gardé, jamais l'IP. Voir <see cref="Geo"/>.</summary>
+    public string GeoMode { get; set; } = Geo.Auto;
+    public string? GeoCountry { get; set; }        // code ISO alpha-2 (« CH »)
+    public DateTime? GeoUtc { get; set; }          // dernière détection automatique
     public string? DeviceHost { get; set; }        // PC Windows : identifiant du PC (plusieurs écrans d'un même PC le partagent)
     public string? DeviceInstance { get; set; }    // PC Windows : nom de l'instance du player qui affiche cet écran
     public List<DeviceMonitor> DeviceMonitors { get; set; } = new();   // PC Windows : moniteurs du PC (1 = principal)

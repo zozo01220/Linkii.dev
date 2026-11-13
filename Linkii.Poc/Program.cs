@@ -17,6 +17,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddSingleton<JsonStore>();
 builder.Services.AddSingleton<ResellerResolver>();
 builder.Services.AddSingleton<NpmProxy>();
+builder.Services.AddSingleton<GeoIpService>();   // pays d'un écran déduit de son IP (carte de l'admin), base locale
 builder.Services.AddSingleton<Mailer>();
 builder.Services.AddSingleton<LifecycleMail>();   // e-mails du parcours d'abonnement (voir Lifecycle)
 builder.Services.AddScoped<Toaster>();
@@ -198,6 +199,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 var app = builder.Build();
 WebSnapshot.KillOrphans();
 app.UseForwardedHeaders();
+app.Services.GetRequiredService<GeoIpService>();   // charge (ou télécharge) la base des pays dès le démarrage
 
 var dataDir = app.Configuration["Linkii:DataDir"] ?? app.Environment.ContentRootPath;
 AppPaths.MediaDir = Path.Combine(dataDir, "media");
@@ -835,10 +837,13 @@ api.MapPost("/player/emergency-ack", (HttpRequest req, EmergencyAckDto body, Jso
 });
 
 // Appareil : système, modèle et version de l'application, remontés au démarrage puis régulièrement.
-api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store) => store.Write(db =>
+api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store, GeoIpService geo) => store.Write(db =>
 {
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
+    // carte de l'admin : pays déduit de l'IP (jamais conservée) ; « off » n'en garde aucun, « manual » garde le choix de l'utilisateur
+    if (s!.GeoMode == Geo.Off) { s.GeoCountry = null; s.GeoUtc = null; }
+    else if (s.GeoMode == Geo.Auto && geo.Country(req.HttpContext.Connection.RemoteIpAddress) is { } cc) { s.GeoCountry = cc; s.GeoUtc = DateTime.UtcNow; }
     static string? Clean(string? v, int max) => string.IsNullOrWhiteSpace(v) ? null : (v.Trim().Length > max ? v.Trim()[..max] : v.Trim());
     s!.DeviceKind = body.Kind is "androidtv" or "android" or "windows" or "raspberrypi" ? body.Kind : "web";
     s.DeviceOs = Clean(body.Os, 40); s.DeviceModel = Clean(body.Model, 60); s.DeviceApp = Clean(body.App, 20);

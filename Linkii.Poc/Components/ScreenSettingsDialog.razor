@@ -55,6 +55,37 @@
             </select>
         }
 
+        <div class="sp-sec">Localisation</div>
+        <div class="sp-row">
+            <div class="grow"><b>Afficher cet écran sur la carte</b><small>Seul le pays est utilisé, jamais l'adresse IP. Désactivé : l'écran n'apparaît pas sur la carte de la plateforme et aucune position n'est conservée.</small></div>
+            <button type="button" class="switch @(geoOn ? "on" : "")" role="switch" aria-checked="@(geoOn ? "true" : "false")" aria-label="Afficher cet écran sur la carte" @onclick="() => geoOn = !geoOn"><span></span></button>
+        </div>
+        @if (geoOn)
+        {
+            <div class="fmt-block">
+                <label>Mode</label>
+                <div class="sp-seg" role="radiogroup" aria-label="Mode de localisation">
+                    <button type="button" role="radio" aria-checked="@(!geoManual ? "true" : "false")" class="@(!geoManual ? "on" : "")" @onclick="() => geoManual = false">Automatique</button>
+                    <button type="button" role="radio" aria-checked="@(geoManual ? "true" : "false")" class="@(geoManual ? "on" : "")" @onclick="() => geoManual = true">Manuel</button>
+                </div>
+            </div>
+            @if (!geoManual)
+            {
+                <p class="hint">Pays déduit de l'adresse IP de l'écran.@(geoCountry != null ? " Détecté : " + WorldGeo.NameOf(geoCountry) + (geoUtc is { } gu ? " (" + gu.ToLocalTime().ToString("d MMM HH:mm", System.Globalization.CultureInfo.GetCultureInfo("fr-CH")) + ")" : "") + "." : " Rien de détecté pour l'instant : l'écran doit d'abord se connecter depuis Internet.")</p>
+            }
+            else
+            {
+                <div class="fmt-block">
+                    <label id="sp-geo-l">Pays</label>
+                    <select style="width:100%" aria-labelledby="sp-geo-l" @bind="geoManualCountry">
+                        <option value="">(choisir un pays)</option>
+                        @foreach (var c in WorldGeo.Countries) { <option value="@c.Code">@c.Name</option> }
+                    </select>
+                    <p class="hint">Prime sur la détection automatique : utile derrière un VPN ou un réseau d'entreprise centralisé.</p>
+                </div>
+            }
+        }
+
         @if (HasDevice)
         {
             <div class="sp-sec">Appareil</div>
@@ -109,6 +140,11 @@
     private string roomCalendar = "";
     private bool isRoomScreen;   // écran de salle (application Réservation de salle)
 
+    private bool geoOn = true, geoManual;   // localisation (carte de l'admin) : affichée sur la carte, mode manuel
+    private string? geoCountry;             // pays détecté ou choisi
+    private DateTime? geoUtc;
+    private string geoManualCountry = "";
+
     private bool IsPc => kind == "windows";
     private bool HasDevice => kind is "windows" or "androidtv" or "android" or "raspberrypi";
 
@@ -122,6 +158,8 @@
         (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
         (autoStart, windowed, monitor) = (s.AutoStart, s.Windowed, s.Monitor);
         monitors = s.DeviceMonitors.OrderBy(m => m.N).ToList();
+        (geoOn, geoManual, geoCountry, geoUtc) = (s.GeoMode != Geo.Off, s.GeoMode == Geo.Manual, s.GeoCountry, s.GeoUtc);
+        geoManualCountry = s.GeoMode == Geo.Manual ? s.GeoCountry ?? "" : "";
         screenParams = s.Params.Select(p => new ScreenParam { Name = p.Name, Value = p.Value }).ToList();
         roomCalendars = Store.Read(d => SharedCalendarSources.RoomContents(d.Tenant).Select(m => (m.Id, m.Name)).ToList());
         roomCalendar = s.RoomCalendarId?.ToString() ?? "";
@@ -150,6 +188,11 @@
                 s.Layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, new ScreenSpec { Type = sp.Type, Orientation = s.Orientation, Resolution = sp.Resolution });   // découpage encore permis
                 s.MirrorH = mh; s.MirrorV = mv;
                 s.AutoStart = au; s.Windowed = wi; s.Monitor = mo;
+                // localisation : rien à envoyer à l'écran ni à publier. Manuel sans pays choisi = automatique.
+                var manualCc = geoManual ? Geo.Valid(geoManualCountry) : null;
+                if (!geoOn) { s.GeoMode = Geo.Off; s.GeoCountry = null; s.GeoUtc = null; }
+                else if (manualCc != null) { s.GeoMode = Geo.Manual; s.GeoCountry = manualCc; s.GeoUtc = null; }
+                else { if (s.GeoMode != Geo.Auto) { s.GeoCountry = null; s.GeoUtc = null; } s.GeoMode = Geo.Auto; }
                 s.RoomCalendarId = room;   // lu avec la source « Cet écran » : rien à publier
                 s.Params = pars;   // lus par l'écran à la prochaine lecture de la source « Cet écran » : rien à publier
                 return c;

@@ -1,0 +1,116 @@
+@inject JsonStore Root
+@inject IWebHostEnvironment Env
+
+@* Carte du monde des écrans (super-administrateur). Une pastille par pays avec le nombre d'écrans ; clic : détail (en ligne / hors ligne).
+   Seul le pays est connu (voir Geo) ; les écrans qui ont désactivé leur localisation n'y figurent pas. *@
+<div class="adm-card wm-card">
+    <div class="adm-ct">Écrans dans le monde <span>@located écran@(located > 1 ? "s" : "") · @pays.Count pays@(unlocated > 0 ? $" · {unlocated} non localisé{(unlocated > 1 ? "s" : "")}" : "")</span></div>
+    <div class="wm-main">
+        <div class="wm-map">
+            <svg viewBox="@VB" role="img" aria-label="Carte du monde des écrans" @onclick="() => Select(null)">
+                <g class="wm-land">@((MarkupString)Paths)</g>
+                @foreach (var p in pays.Where(p => p.Pin))
+                {
+                    var r = Scale * 11;
+                    var sel = selected == p.Code;
+                    <g class="wm-pin @(p.Off > 0 ? "off" : "") @(sel ? "sel" : "")" transform="translate(@N(p.X) @N(p.Y)) scale(@N(Scale))" @onclick="() => Select(p.Code)" @onclick:stopPropagation="true" role="button" tabindex="0" aria-label="@p.Name : @p.Total écran@(p.Total > 1 ? "s" : "")" @onkeydown="e => Key(e, p.Code)">
+                        <circle class="halo" r="11" />
+                        <circle class="bg" r="11" />
+                        <rect x="-5.5" y="-5" width="11" height="7" rx="1" fill="none" stroke="#fff" stroke-width="1.4" />
+                        <path d="M-2.5 5H2.5M0 2V5" stroke="#fff" stroke-width="1.4" fill="none" />
+                        <circle class="bd" cx="9" cy="-9" r="6.5" />
+                        <text x="9" y="-9">@p.Total</text>
+                    </g>
+                }
+            </svg>
+            <div class="wm-zoom"><button type="button" aria-label="Zoomer" @onclick="() => Zoom(1.6)">+</button><button type="button" aria-label="Dézoomer" @onclick="() => Zoom(1 / 1.6)">−</button><button type="button" aria-label="Vue monde" title="Vue monde" @onclick="Reset">⌂</button></div>
+            @if (pays.FirstOrDefault(p => p.Code == selected) is { } sp)
+            {
+                var left = (sp.X - vx) / vw * 100; var top = (sp.Y - vy) / (vw / 2) * 100;
+                <div class="wm-pop @(left > 62 ? "l" : "")" style="left:@N(left)%;top:@N(top)%" role="dialog" aria-label="@sp.Name">
+                    <div class="wm-pop-h"><b>@sp.Name</b><button type="button" class="wm-x" aria-label="Fermer" @onclick="() => Select(null)">✕</button></div>
+                    <div class="wm-pop-r"><span>Écrans</span><b>@sp.Total</b></div>
+                    <div class="wm-pop-r"><span><i class="dot g"></i>En ligne</span><b>@sp.On</b></div>
+                    <div class="wm-pop-r"><span><i class="dot r"></i>Hors ligne</span><b>@sp.Off</b></div>
+                    <div class="wm-pop-r"><span>Clients</span><b>@sp.Clients</b></div>
+                </div>
+            }
+            <div class="wm-legend"><span><i class="dot n"></i>Tous en ligne</span><span><i class="dot r"></i>Au moins un hors ligne</span></div>
+        </div>
+        <div class="wm-side">
+            @foreach (var p in pays)
+            {
+                <button type="button" class="wm-li @(selected == p.Code ? "sel" : "")" @onclick="() => Pick(p)">
+                    <span class="wm-cc">@p.Code</span>
+                    <span class="wm-nm">@p.Name<span class="wm-bar"><i style="width:@((int)Math.Round(p.Total * 100.0 / maxTotal))%"></i></span></span>
+                    <span class="wm-n @(p.Off > 0 ? "r" : "")" title="@(p.Off > 0 ? p.Off + " hors ligne" : "Tous en ligne")">@p.Total</span>
+                </button>
+            }
+            @if (pays.Count == 0) { <div class="adm-empty">Aucun écran localisé pour le moment. Les écrans se localisent à leur prochaine connexion.</div> }
+        </div>
+    </div>
+</div>
+
+@code {
+    private record Pays(string Code, string Name, double X, double Y, bool Pin, int Total, int On, int Clients)
+    {
+        public int Off => Total - On;
+    }
+
+    private static string? paths;
+    private string Paths => paths ??= File.ReadAllText(Path.Combine(Env.WebRootPath, "admin", "world-paths.txt"));
+
+    private List<Pays> pays = new();
+    private int located, unlocated, maxTotal = 1;
+    private string? selected;
+    private double vx, vy, vw = WorldGeo.Width;   // zone visible (largeur ; hauteur = largeur / 2)
+
+    private string VB => $"{N(vx)} {N(vy)} {N(vw)} {N(vw / 2)}";
+    private double Scale => vw / WorldGeo.Width;
+    private static string N(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    protected override void OnInitialized()
+    {
+        var now = DateTime.UtcNow;
+        Root.Read(d =>
+        {
+            var live = d.Screens.Where(s => s.Token != null && s.GeoMode != Geo.Off).ToList();
+            unlocated = live.Count(s => s.GeoCountry == null);
+            pays = live.Where(s => s.GeoCountry != null).GroupBy(s => s.GeoCountry!).Select(g =>
+            {
+                var c = WorldGeo.Find(g.Key);
+                return new Pays(g.Key, c?.Name ?? g.Key, c?.X ?? 0, c?.Y ?? 0, c != null, g.Count(), g.Count(s => ScreenControl.Online(s, now)), g.Select(s => s.ClientId).Distinct().Count());
+            }).OrderByDescending(p => p.Total).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            return 0;
+        });
+        located = pays.Sum(p => p.Total);
+        maxTotal = Math.Max(1, pays.Count == 0 ? 1 : pays.Max(p => p.Total));
+    }
+
+    private void Key(KeyboardEventArgs e, string code) { if (e.Key is "Enter" or " ") Select(code); }
+
+    private void Select(string? code) => selected = selected == code ? null : code;
+
+    private void Pick(Pays p)
+    {
+        selected = p.Code;
+        if (!p.Pin) return;
+        vw = Math.Min(vw, 420);   // recentre sur le pays choisi dans la liste
+        Center(p.X, p.Y);
+    }
+
+    private void Center(double x, double y)
+    {
+        vx = Math.Clamp(x - vw / 2, 0, WorldGeo.Width - vw);
+        vy = Math.Clamp(y - vw / 4, 0, WorldGeo.Height - vw / 2);
+    }
+
+    private void Zoom(double f)
+    {
+        var (cx, cy) = (vx + vw / 2, vy + vw / 4);
+        vw = Math.Clamp(vw / f, WorldGeo.Width / 8.0, WorldGeo.Width);
+        Center(cx, cy);
+    }
+
+    private void Reset() { vx = 0; vy = 0; vw = WorldGeo.Width; selected = null; }
+}
