@@ -10,7 +10,7 @@
   const WNAMES = { clock: 'Horloge', date: 'Date', ticker: 'Bandeau défilant', countdown: 'Compte à rebours', counter: 'Compteur animé' };
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   // pastille d'une source : vrai logo si elle en a un (rss, Home Assistant, météo), sinon le pictogramme sur sa couleur
-  const wi = m => m.logo ? `<span class="wi is-brand"><svg width="100%" height="100%"><use href="/brand-logos.svg#${m.logo}" width="100%" height="100%"/></svg></span>` : `<span class="wi" style="background:${m.color}">${m.icon}</span>`;
+  const wi = m => m.logo ? `<span class="wi is-brand"><svg width="100%" height="100%"><use href="/brand-logos.svg?v=255#${m.logo}" width="100%" height="100%"/></svg></span>` : `<span class="wi" style="background:${m.color}">${m.icon}</span>`;
   const LC = () => w.LinkiiCompo;
 
   // ---------- état de l'éditeur monté ----------

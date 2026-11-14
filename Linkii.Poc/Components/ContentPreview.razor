@@ -72,6 +72,41 @@
                 {
                     <div class="cp-browser"><div class="cp-url">@SourceValue</div><div class="cp-frame"><iframe src="@SourceValue" title="Aperçu de la page" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1"></iframe></div><QrBadge Qr="Qr" OnMoved="OnQrMoved" /></div>
                 }
+                else if (Manifest.Id == "linkedin" && result.Data is { } li && li.TryGetProperty("posts", out var lps) && lps.ValueKind == JsonValueKind.Array)
+                {
+                    @* LinkedIn (§255) : même rendu que l'écran (player/apps.js « linkedin »), réduit à la zone d'aperçu *@
+                    var list = lps.EnumerateArray().ToList();
+                    var wall = Values.GetValueOrDefault("layout") == "wall";
+                    var shownLi = wall ? list.Take(3).ToList() : list.Take(1).ToList();
+                    <div class="cp-stage cp-li @(wall ? "wall" : "one")">
+                        <div class="cp-li-in">
+                            <div class="cp-li-h"><span class="pg">@Str(li, "initials")</span><span class="nm">@Str(li, "page")</span><svg class="brand-logo" aria-hidden="true"><use href="@(BrandLogos.Sprite + "#linkedin")" width="100%" height="100%"></use></svg></div>
+                            @if (shownLi.Count == 0)
+                            {
+                                <div class="cp-li-empty">Aucune publication affichée pour le moment : validez-en une dans « Publications ».</div>
+                            }
+                            else
+                            {
+                                <div class="cp-li-grid">
+                                    @foreach (var p in shownLi)
+                                    {
+                                        <div class="cp-li-card @(Str(p, "image").Length == 0 ? "txt" : "")">
+                                            @if (Str(p, "image") is { Length: > 0 } img) { <div class="im"><img src="@img" alt="" />@if (Str(p, "video").Length > 0) { <span class="car-play" aria-hidden="true"></span> }</div> }
+                                            <div class="tx">
+                                                <div class="x">@Str(p, "text")</div>
+                                                <div class="ft">
+                                                    @if (p.TryGetProperty("likes", out var lk) && lk.ValueKind == JsonValueKind.Number) { <span class="rx">👍 @lk.GetInt32()@(p.TryGetProperty("comments", out var cm) && cm.ValueKind == JsonValueKind.Number ? $" · {cm.GetInt32()} commentaires" : "")</span> }
+                                                    @if (!wall && Str(p, "qr") is { Length: > 0 } q && q.Split('|') is [var n, var path]) { <svg class="qr" viewBox="0 0 @n @n" shape-rendering="crispEdges" aria-hidden="true"><path d="@path" fill="#0B1F3A" /></svg> }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                        <QrBadge Qr="Qr" OnMoved="OnQrMoved" />
+                    </div>
+                }
                 else if (result.Data is { } fb && fb.TryGetProperty("posts", out var posts) && posts.ValueKind == JsonValueKind.Array)
                 {
                     var shown = posts.EnumerateArray().Take(4).ToList();
@@ -203,6 +238,7 @@
     {
         "calendar" => "Choisissez un calendrier ci-dessus.",
         "facebookpage" => "Choisissez une Page ci-dessus : son aperçu s'affiche aussitôt.",
+        "linkedinpage" => "Choisissez une page LinkedIn : ses publications s'affichent aussitôt.",
         "city" => "Saisissez une ville ci-dessus, puis cliquez sur « Rechercher ».",
         _ => "Saisissez l'adresse ci-dessus, puis cliquez sur « Rechercher »."
     };

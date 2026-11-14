@@ -13,6 +13,7 @@
 @inject MicrosoftAuth MsAuth
 @inject DropboxAuth DropboxAuth
 @inject FacebookAuth FacebookAuth
+@inject LinkedinAuth LinkedinAuth
 @inject HomeAssistantClient HaClient
 @inject HomeAssistantLive HaLive
 @inject ModeService Modes
@@ -65,7 +66,7 @@
                     {
                         var kind = k;
                         var ready = Available(kind.Id);
-                        @if (kind.Id is ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook && ready)
+                        @if (kind.Id is ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook or ConnectedAccounts.Linkedin && ready)
                         {
                             <a role="menuitem" href="@Cu(ConnectedAccounts.ConnectUrl(kind.Id))" target="_top"><AccountLogo Kind="@kind.Id" Size="20" /><span><b>@kind.Name</b><small>@kind.Summary</small></span></a>
                         }
@@ -185,7 +186,7 @@ else
         {
             var a = acc;
             var state = AccState(a);
-            var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook;
+            var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook or ConnectedAccounts.Linkedin;
             <article class="acc-card @(flash == a.Id ? "flash" : "") @(openAcc.Contains(a.Id) ? "open" : "")" tabindex="-1" @ref="accRefs[a.Id]" aria-labelledby="acc-@a.Id"
                      @oncontextmenu="() => { if (inApp) accMenu = a.Id; }" @oncontextmenu:preventDefault="inApp">
                 <div class="acc-head" @onclick="() => ToggleAcc(a.Id)">
@@ -506,14 +507,14 @@ else
         "image" or "slideshow-images" or "video" or "slideshow-videos" or "pdf" or "composition" => "Médias",
         "rss" or "webpage" or "youtube" or "weather-slide" => "Web",
         "canva" or "google-slides" or "google-docs" or "ms-powerpoint" => "Documents et design",
-        "facebook" => "Réseaux sociaux",
+        "facebook" or "linkedin" => "Réseaux sociaux",
         "emergency" => "Sécurité",
         RoomRules.AppId => CalendarsGroup,
         _ => "Autres"
     };
 
     // Ordre des cartes dans leur groupe (les apps absentes de la liste suivent, par nom).
-    private static readonly string[] Order = { "image", "slideshow-images", "video", "slideshow-videos", "canva", "pdf", "composition", "google-slides", "google-docs", "ms-powerpoint", "youtube", "rss", "weather-slide", "facebook", "webpage" };
+    private static readonly string[] Order = { "image", "slideshow-images", "video", "slideshow-videos", "canva", "pdf", "composition", "google-slides", "google-docs", "ms-powerpoint", "youtube", "rss", "weather-slide", "facebook", "linkedin", "webpage" };
 
     [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
 
@@ -618,6 +619,7 @@ else
     /// <summary>Ce que demande une application du Store avant d'être utilisable.</summary>
     private static string Need(string id) => id == "cal-ics" ? "Lien à renseigner"
         : ConnectedAccounts.For(id) is not { } kind ? "Aucun compte requis"
+        : kind == ConnectedAccounts.Linkedin ? "Compte LinkedIn qui gère la page"
         : kind is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook
             ? $"Compte {ConnectedAccounts.Kind(kind).Name} requis" : "Serveur à renseigner";
 
@@ -691,7 +693,7 @@ else
                 await Drives.RemoveFolder(Store.ClientId, f.Id);
         }
         else if (id.StartsWith("cal-")) { var source = id[4..]; Store.Write(d => { d.Tenant.SharedCalendars.RemoveAll(c => c.Source == source); }); }
-        else if (id is "google-slides" or "google-docs" or "ms-powerpoint" or "facebook") Svc.Uninstall(id);   // contenus et images converties
+        else if (id is "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "linkedin") Svc.Uninstall(id);   // contenus et images converties
         else if (id == RoomRules.AppId) { RoomSetup.Uninstall(Store, Svc); await Notifier.NotifyClient(Store.ClientId); }   // salles et règles gardées ; portes « Application retirée »
         if (id != "ha-home") SetOn(id, false);
         Svc.Unmark(id);
@@ -1004,6 +1006,8 @@ else
             var drive = AccountOf(kind)?.Permissions.Any(x => x.Purpose == AccountPurposes.Drive && x.Granted) == true;
             if (AccountProblem(kind, drive) is { } p) return CatalogView.Entry.Of(a, p.Item1, p.Item2, false) with { StatusTitle = p.Item3 };
         }
+        if (a.Id == "linkedin" && AccountOf(ConnectedAccounts.Linkedin) is { Lost: true })   // connexion expirée (60 jours) ou retirée : les écrans gardent la dernière version
+            return CatalogView.Entry.Of(a, "Reconnecter LinkedIn", "hors-ligne", false) with { StatusTitle = "Reconnecter LinkedIn (connexion expirée)" };
         if (a.Id == "facebook" && AccountOf(ConnectedAccounts.Facebook) is { Lost: true } fb)   // sans compte, l'application marche encore avec un jeton collé à la main
             return CatalogView.Entry.Of(a, "Compte à reconnecter", "hors-ligne", false) with { StatusTitle = $"La connexion au compte {fb.Kind} a expiré : reconnectez-le dans Comptes connectés." };
         return CatalogView.Entry.Of(a, "Active", "en-ligne", false);
@@ -1115,6 +1119,7 @@ else
         ConnectedAccounts.Canva => canvaReady,
         ConnectedAccounts.Dropbox => DropboxAuth.IsConfigured,
         ConnectedAccounts.Facebook => FacebookAuth.IsConfigured,
+        ConnectedAccounts.Linkedin => LinkedinAuth.IsConfigured,
         _ => true
     };
 
@@ -1181,6 +1186,7 @@ else
             case ConnectedAccounts.Canva: Canva.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Dropbox: await DropboxAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Facebook: FacebookAuth.Disconnect(Store.ClientId); break;
+            case ConnectedAccounts.Linkedin: LinkedinAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Nextcloud or ConnectedAccounts.Sftp: Store.Write(d => d.Tenant.DriveAccounts.RemoveAll(x => x.Source == id)); break;
             case ConnectedAccounts.HomeAssistant: await HaClient.Disconnect(Store.ClientId, Store); break;
             default:
@@ -1221,6 +1227,7 @@ else
         MicrosoftReturn();
         DropboxReturn();
         FacebookReturn();
+        LinkedinReturn();
         // Réservation de salle : retour d'une connexion lancée par son assistant (réussie ou non), il reprend où il était (brouillon gardé)
         if (Embed == null && Mode != "app" && admin && WizParam == RoomRules.AppId && wizId == null) OpenWizard(RoomRules.AppId, 2, !InMineId(RoomRules.AppId), resume: true);
         if (Embed != null || Mode == "app") return;
@@ -1412,7 +1419,7 @@ else
     private static string Initials(string user) => user.Trim().Length == 0 ? "?" : string.Concat(user.Split([' ', '@', '.'], StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
 
     private static string ManageLabel(string id) => id == "canva" || id.StartsWith("drv-") ? "Gérer les dossiers…" : id.StartsWith("cal-") ? "Gérer les calendriers…"
-        : id == "facebook" ? "Voir les Pages…" : id == "ha-home" ? "Voir les entités…" : "Voir les fichiers…";
+        : id == "facebook" ? "Voir les Pages…" : id == "linkedin" ? "Voir les pages…" : id == "ha-home" ? "Voir les entités…" : "Voir les fichiers…";
 
     /// <summary>Applications qui copient du contenu dans la médiathèque : « Resynchroniser maintenant ».</summary>
     public static bool HasSync(string id) => id == "canva" || id.StartsWith("drv-");
@@ -1428,7 +1435,7 @@ else
         Toast.Ok("Synchronisation lancée : les fichiers arrivent dans la médiathèque.");
     }
 
-    public static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews" or "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "ha-home" or RoomRules.AppId;
+    public static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews" or "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "linkedin" or "ha-home" or RoomRules.AppId;
 
     private void OpenWizard(string id, int step, bool adding, bool resume = false) { pendingUse = null; wizId = id; wizStep = step; wizAdding = adding; wizResume = resume; }
 
@@ -1596,6 +1603,25 @@ else
             case "expired": Toast.Error("La demande de connexion à Dropbox a expiré. Recommencez."); break;
             case "unconfigured": Toast.Error("La connexion Dropbox n'est pas encore configurée sur cette plateforme."); break;
             case not null: Toast.Error("Dropbox a refusé la connexion. Réessayez dans un instant."); break;
+        }
+    }
+
+    // Retour de « Continuer avec LinkedIn » (/linkedin/pages/callback, §255) : l'assistant reprend à l'étape des pages.
+    private void LinkedinReturn()
+    {
+        var q = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["linkedin"];
+        switch (q)
+        {
+            case "ok" or "nopages":
+                Load();
+                if (q == "nopages") Toast.Error("LinkedIn est connecté, mais ce compte ne gère aucune page lisible (administrateur ou éditeur de contenu).");
+                if (accountsTab) FlashAccount(ConnectedAccounts.Linkedin);
+                else OpenWizard("linkedin", 2, !InMineId("linkedin"));
+                break;
+            case "denied": Toast.Error("Connexion à LinkedIn annulée."); break;
+            case "expired": Toast.Error("La demande de connexion à LinkedIn a expiré. Recommencez."); break;
+            case "unconfigured": Toast.Error("La connexion LinkedIn n'est pas encore configurée sur cette plateforme."); break;
+            case not null: Toast.Error("LinkedIn a refusé la connexion. Réessayez dans un instant."); break;
         }
     }
 

@@ -5,6 +5,7 @@
 @inject GoogleAuth GoogleAuth
 @inject MicrosoftAuth MsAuth
 @inject FacebookAuth FacebookAuth
+@inject LinkedinAuth LinkedinAuth
 @inject CloudFileService Importer
 
 @* Applications › Google Slides, Google Docs, Microsoft PowerPoint, Facebook : assistant d'ajout, fenêtre centrée (maquette assistant-ajout-simplifie.html).
@@ -46,6 +47,37 @@
                 }
                 <div class="cw-after"><span>ℹ</span><span>Les Pages cochées seront proposées dans vos listes de lecture.</span></div>
             }
+            else if (Li)
+            {
+                @* LinkedIn (§255) : pages où la personne a un rôle ; seules celles d'un administrateur ou d'un éditeur de contenu sont lisibles *@
+                var readable = liPages.Where(p => p.CanRead).ToList();
+                <h2 class="cw-h">Vos pages LinkedIn</h2>
+                <p class="cw-lead">@(liPages.Count == 0 ? "Nous n'avons trouvé aucune page." : $"Nous avons trouvé {liPages.Count} page{(liPages.Count > 1 ? "s" : "")} dans votre compte. Chaque page cochée pourra être ajoutée à vos listes de lecture (une page par contenu).")</p>
+                @if (readable.Count == 0)
+                {
+                    <div class="dfp-empty">@(liPages.Count == 0 ? "Ce compte ne gère aucune page entreprise. LinkedIn ne permet pas d'afficher les publications d'un profil personnel." : "Votre rôle sur ces pages ne permet pas de lire leurs publications.") Connectez-vous avec le compte qui gère la page, ou demandez à un administrateur de la page de vous donner le rôle « Éditeur de contenu ».</div>
+                    <p><a class="cw-sub" href="@ConnectUrl" target="_top">Utiliser un autre compte</a></p>
+                }
+                else
+                {
+                    <div class="cw-tools">
+                        <span class="cw-count"><b>@chosenPages.Count</b> sur @readable.Count sélectionnée@(chosenPages.Count > 1 ? "s" : "")</span>
+                        <button type="button" class="btn ghost sm" @onclick="ToggleAllLi">@(chosenPages.Count == readable.Count ? "Tout désélectionner" : "Tout sélectionner")</button>
+                    </div>
+                    <div class="cw-rows">
+                        @foreach (var p in liPages.OrderBy(p => p.CanRead ? 0 : 1))
+                        {
+                            var urn = p.Urn;
+                            var on = chosenPages.Contains(urn);
+                            <button type="button" class="cw-row @(on ? "on" : "") @(p.CanRead ? "" : "dis")" disabled="@(!p.CanRead)" title="@(p.CanRead ? null : "Ce rôle ne permet pas de lire les publications de la page")" @onclick="() => TogglePage(urn)"><span class="cw-av">@(p.Name.Length > 0 ? p.Name[..1] : "?")</span><b>@p.Name</b><span class="cw-role">@LinkedinAuth.RoleLabel(p.Role)</span><span class="cw-ck">@(on ? "✓" : "")</span></button>
+                        }
+                    </div>
+                }
+                @if (liPages.Any(p => !p.CanRead) && readable.Count > 0)
+                {
+                    <div class="cw-after"><span>ℹ</span><span>Les pages grisées ne peuvent pas être affichées : votre rôle ne permet pas de lire leurs publications. Demandez le rôle « Éditeur de contenu » à un administrateur de la page.</span></div>
+                }
+            }
             else
             {
                 <h2 class="cw-h">Que voulez-vous ajouter ?</h2>
@@ -81,7 +113,7 @@
             {
                 <div class="cw-bigok">✓</div>
                 <h2 class="cw-h">@Name est prêt</h2>
-                <p class="cw-lead">@(AppId == "facebook" ? $"{chosenPages.Count} Page{(chosenPages.Count > 1 ? "s" : "")} prête{(chosenPages.Count > 1 ? "s" : "")} à être affichée{(chosenPages.Count > 1 ? "s" : "")}." : chosen.Count == 0 ? "Vous pourrez ajouter vos fichiers depuis une liste de lecture." : $"{chosen.Count - importErrors.Count} {Noun(chosen.Count - importErrors.Count)} ajoutée{(chosen.Count - importErrors.Count > 1 ? "s" : "")} à votre Médiathèque.")</p>
+                <p class="cw-lead">@(Li ? $"{chosenPages.Count} page{(chosenPages.Count > 1 ? "s" : "")} prête{(chosenPages.Count > 1 ? "s" : "")} à être affichée{(chosenPages.Count > 1 ? "s" : "")}. Ajoutez LinkedIn à une liste de lecture pour l'afficher sur vos écrans." : AppId == "facebook" ? $"{chosenPages.Count} Page{(chosenPages.Count > 1 ? "s" : "")} prête{(chosenPages.Count > 1 ? "s" : "")} à être affichée{(chosenPages.Count > 1 ? "s" : "")}." : chosen.Count == 0 ? "Vous pourrez ajouter vos fichiers depuis une liste de lecture." : $"{chosen.Count - importErrors.Count} {Noun(chosen.Count - importErrors.Count)} ajoutée{(chosen.Count - importErrors.Count > 1 ? "s" : "")} à votre Médiathèque.")</p>
             }
             else
             {
@@ -107,13 +139,16 @@
     private static readonly string[] Labels = { "Compte", "Sélection", "Terminé" };
     private CloudFileKind Cloud => CloudFileKind.Of(AppId)!;
     private string Name => Svc.Find(AppId)?.Name ?? AppId;
-    private string Kind => AppId == "facebook" ? ConnectedAccounts.Facebook : Cloud.IsGoogle ? ConnectedAccounts.Google : ConnectedAccounts.Microsoft;
-    private string Provider => AppId == "facebook" ? "Facebook" : Cloud.IsGoogle ? "Google" : "Microsoft";
-    private string ConnectUrl => AppId == "facebook" ? "/facebook/connect?wiz=facebook"
+    private bool Li => AppId == "linkedin";
+    private string Kind => Li ? ConnectedAccounts.Linkedin : AppId == "facebook" ? ConnectedAccounts.Facebook : Cloud.IsGoogle ? ConnectedAccounts.Google : ConnectedAccounts.Microsoft;
+    private string Provider => Li ? "LinkedIn" : AppId == "facebook" ? "Facebook" : Cloud.IsGoogle ? "Google" : "Microsoft";
+    private string ConnectUrl => Li ? "/linkedin/pages/connect?wiz=linkedin" : AppId == "facebook" ? "/facebook/connect?wiz=facebook"
         : Cloud.IsGoogle ? $"/google/connect?for=drive&wiz={AppId}" : $"/microsoft/connect?for=drive&wiz={AppId}";
     private string Noun(int n) => AppId switch { "google-slides" => n > 1 ? "présentations" : "présentation", "google-docs" => n > 1 ? "documents" : "document", _ => n > 1 ? "présentations PowerPoint" : "présentation PowerPoint" };
     private string FileNoun => AppId switch { "google-slides" => "Présentations", "google-docs" => "Documents", _ => "Présentations PowerPoint" };
-    private string[] Permissions => AppId == "facebook"
+    private string[] Permissions => Li
+        ? new[] { "Lire la liste des pages que vous gérez et votre rôle (r_organization_admin)", "Lire les publications de ces pages, leurs photos, vidéos et nombres de réactions (r_organization_social)", "Connexion valable environ 60 jours : Linkivi vous prévient 7 jours avant", "Rien n'est modifié ni publié chez LinkedIn" }
+        : AppId == "facebook"
         ? new[] { "Lire la liste des Pages que vous administrez", "Lire les publications de ces Pages" }
         : new[] { "Lire vos fichiers (" + FileNoun.ToLowerInvariant() + ")", "Les convertir en images pour vos écrans", "Lire le nom de votre profil" };
 
@@ -132,16 +167,26 @@
 
     private void TogglePage(string id) { if (!chosenPages.Remove(id)) chosenPages.Add(id); }
     private void ToggleAllPages() { if (chosenPages.Count == pages.Count) chosenPages.Clear(); else chosenPages.UnionWith(pages.Select(p => p.Id)); }
+    private List<LinkedinPageAccess> liPages = new();
+    private void ToggleAllLi()
+    {
+        var readable = liPages.Where(p => p.CanRead).Select(p => p.Urn).ToList();
+        if (chosenPages.Count == readable.Count) chosenPages.Clear(); else chosenPages.UnionWith(readable);
+    }
 
-    private bool NextDisabled => importing || step == 1 && !connected || step == 2 && (loading || error != null || (AppId == "facebook" ? pages.Count > 0 && chosenPages.Count == 0 : chosen.Count == 0 && files.Count > 0));
+    private bool NextDisabled => importing || step == 1 && !connected || step == 2 && (loading || error != null
+        || (Li ? chosenPages.Count == 0 : AppId == "facebook" ? pages.Count > 0 && chosenPages.Count == 0 : chosen.Count == 0 && files.Count > 0));
     private string NextLabel => step == 1 ? "Suivant"
+        : step == 2 && Li ? (chosenPages.Count > 0 ? $"Ajouter {chosenPages.Count} page{(chosenPages.Count > 1 ? "s" : "")}" : "Ajouter")
         : step == 2 ? (AppId == "facebook" ? (chosenPages.Count > 0 ? $"Ajouter {chosenPages.Count} Page{(chosenPages.Count > 1 ? "s" : "")}" : "Ajouter Facebook") : chosen.Count > 0 ? $"Ajouter {chosen.Count} {Noun(chosen.Count)}" : "Ajouter " + Name)
         : "Ajout en cours…";
     private string Hint => step == 3 ? "" : Adding ? "Rien n'est enregistré tant que vous n'avez pas ajouté." : "";
     private int Progress => doneCount * 100 / Math.Max(1, chosen.Count);
     private int doneCount;
-    private string[]? CanDo => AppId == "facebook" ? new[] { "Voir la liste de vos Pages", "Afficher leurs publications sur vos écrans" } : null;
-    private string[]? CannotDo => AppId == "facebook" ? new[] { "Publier à votre place", "Voir votre profil personnel" } : null;
+    private string[]? CanDo => Li ? new[] { "Voir les pages que vous gérez", "Afficher leurs publications sur vos écrans" }
+        : AppId == "facebook" ? new[] { "Voir la liste de vos Pages", "Afficher leurs publications sur vos écrans" } : null;
+    private string[]? CannotDo => Li ? new[] { "Publier, commenter ou réagir à votre place", "Voir votre profil, vos messages ou vos contacts" }
+        : AppId == "facebook" ? new[] { "Publier à votre place", "Voir votre profil personnel" } : null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -155,7 +200,15 @@
         var t = Store.Read(d => d.Tenant);
         lost = false;
         Missing = $"Connectez le compte {Provider} qui a accès à vos fichiers.";
-        if (AppId == "facebook")
+        if (Li)
+        {
+            ready = LinkedinAuth.IsConfigured;
+            connected = LinkedinAuth.Has(t);
+            lost = t.LinkedinConnectedUtc != null && !connected;
+            user = t.LinkedinUser.Length > 0 ? t.LinkedinUser : "Compte LinkedIn"; since = t.LinkedinConnectedUtc;
+            Missing = "Connectez le compte LinkedIn qui gère la page de votre organisation (administrateur ou éditeur de contenu).";
+        }
+        else if (AppId == "facebook")
         {
             ready = FacebookAuth.IsConfigured;
             connected = FacebookAuth.Has(t);
@@ -188,7 +241,14 @@
         var t = Store.Read(d => d.Tenant);
         try
         {
-            if (AppId == "facebook") { pages = FacebookAuth.Pages(t); chosenPages.Clear(); chosenPages.UnionWith(pages.Where(p => !p.Off).Select(p => p.Id)); }
+            if (Li)
+            {
+                // pages et rôles relus chez LinkedIn (un rôle a pu changer depuis la connexion) ; à défaut, ceux de la connexion
+                if (!Adding) { await LinkedinAuth.RefreshPages(t); t = Store.Read(d => d.Tenant); }
+                liPages = t.LinkedinPages.ToList();
+                chosenPages.Clear(); chosenPages.UnionWith(liPages.Where(p => p.CanRead && !p.Off).Select(p => p.Urn));
+            }
+            else if (AppId == "facebook") { pages = FacebookAuth.Pages(t); chosenPages.Clear(); chosenPages.UnionWith(pages.Where(p => !p.Off).Select(p => p.Id)); }
             else
             {
                 var l = await Drives.BrowseFiles(t, Cloud, DriveSources.Roots(Cloud.Source)[0].Key, null);
@@ -235,7 +295,12 @@
             Svc.SetContentsOn(pages.Where(p => chosenPages.Contains(p.Id)).Select(p => ("page", p.Id)), true);
             Svc.SetContentsOn(pages.Where(p => !chosenPages.Contains(p.Id)).Select(p => ("page", p.Id)), false);
         }
-        if (AppId != "facebook" && chosen.Count > 0)
+        if (Li)
+        {
+            Svc.SetContentsOn(liPages.Where(p => chosenPages.Contains(p.Urn)).Select(p => ("lipage", p.Urn)), true);
+            Svc.SetContentsOn(liPages.Where(p => !chosenPages.Contains(p.Urn)).Select(p => ("lipage", p.Urn)), false);
+        }
+        if (AppId != "facebook" && !Li && chosen.Count > 0)
         {
             importing = true; importErrors.Clear(); doneCount = 0; var k = 0;
             var tenant = Store.Read(d => d.Tenant);

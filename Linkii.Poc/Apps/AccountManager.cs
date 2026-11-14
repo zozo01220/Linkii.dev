@@ -5,7 +5,7 @@ namespace Linkii.Poc;
 /// à l'annulation d'un assistant d'ajout (rien ne reste) et au retrait d'une application (le compte part avec elle).
 /// Un compte Google ou Microsoft est partagé par plusieurs applications : il ne part qu'avec la dernière (<see cref="UsedByOthers"/>).
 /// </summary>
-public class AccountManager(TenantStore store, MicrosoftAuth ms, GoogleAuth google, CanvaService canva, DropboxAuth dropbox, FacebookAuth facebook, HistoryLog history, TenantContext hctx, HomeAssistantClient ha)
+public class AccountManager(TenantStore store, MicrosoftAuth ms, GoogleAuth google, CanvaService canva, DropboxAuth dropbox, FacebookAuth facebook, LinkedinAuth linkedin, HistoryLog history, TenantContext hctx, HomeAssistantClient ha)
 {
     /// <summary>Retire le compte de l'organisation (type de <see cref="ConnectedAccounts"/>).</summary>
     public async Task Disconnect(string kind)
@@ -19,6 +19,7 @@ public class AccountManager(TenantStore store, MicrosoftAuth ms, GoogleAuth goog
             case ConnectedAccounts.Canva: canva.Disconnect(clientId); break;
             case ConnectedAccounts.Dropbox: await dropbox.Disconnect(clientId); break;
             case ConnectedAccounts.Facebook: facebook.Disconnect(clientId); break;
+            case ConnectedAccounts.Linkedin: linkedin.Disconnect(clientId); break;
             case ConnectedAccounts.Nextcloud or ConnectedAccounts.Sftp: store.Write(d => d.Tenant.DriveAccounts.RemoveAll(x => x.Source == kind)); break;
             case ConnectedAccounts.HomeAssistant: await ha.Disconnect(clientId, store); break;
             default:   // serveurs CalDAV et Exchange

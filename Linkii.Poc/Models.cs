@@ -569,6 +569,24 @@ public class Tenant
     public DateTime? FacebookLostUtc { get; set; }
     public List<FacebookPageAccess> FacebookPages { get; set; } = new();
 
+    // Compte LinkedIn connecté par l'organisation (« Continuer avec LinkedIn », Community Management API, lecture seule) : jeton d'accès chiffré (SecretBox),
+    // valable environ 60 jours ; jeton de renouvellement chiffré quand LinkedIn en donne un. Pages proposées : celles où la personne a un rôle.
+    public string LinkedinUser { get; set; } = "";
+    public DateTime? LinkedinConnectedUtc { get; set; }
+    public DateTime? LinkedinExpiresUtc { get; set; }
+    /// <summary>Connexion expirée ou refusée par LinkedIn : l'application est « à reconnecter », les écrans gardent la dernière version.</summary>
+    public DateTime? LinkedinLostUtc { get; set; }
+    public string LinkedinToken { get; set; } = "";
+    public string LinkedinRefresh { get; set; } = "";
+    public DateTime? LinkedinRefreshExpiresUtc { get; set; }
+    public List<LinkedinPageAccess> LinkedinPages { get; set; } = new();
+    /// <summary>Réglages de l'application LinkedIn (Applications › LinkedIn › Configuration), pour tous ses contenus.</summary>
+    public bool LinkedinReactions { get; set; } = true;
+    public bool LinkedinApproval { get; set; } = true;
+    public int LinkedinMaxAgeDays { get; set; } = 30;
+    /// <summary>Dernier rappel d'échéance envoyé (« 7|2027-01-13 », « 1|… », « 0|… ») : un rappel par palier et par connexion.</summary>
+    public string LinkedinReminded { get; set; } = "";
+
     // Compte Microsoft connecté par l'organisation (« Se connecter avec Microsoft », lecture seule), partagé par Microsoft 365 (agendas) et
     // OneDrive / SharePoint. MsScopes : accès accordés (noms courts Graph). Jeton de renouvellement chiffré (SecretBox).
     // Les anciens champs MsTenantId / MsClientId / MsClientSecret (application Entra ID de chaque client) ne sont plus lus.
@@ -776,6 +794,22 @@ public class FacebookPageAccess
     public string Name { get; set; } = "";
     public string Token { get; set; } = "";
     public bool Off { get; set; }   // désactivée dans la page de l'application : n'est plus proposée
+}
+
+/// <summary>
+/// Une page LinkedIn sur laquelle la personne connectée a un rôle. Seuls les rôles « Administrateur » et « Éditeur de contenu » permettent de lire
+/// les publications (CanRead) ; les autres pages sont montrées grisées dans l'assistant. Approved / Hidden : publications validées et masquées
+/// (identifiants urn:li:share|ugcPost), gardées au plus 200 chacune.
+/// </summary>
+public class LinkedinPageAccess
+{
+    public string Urn { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Role { get; set; } = "";
+    public bool CanRead { get; set; }
+    public bool Off { get; set; }   // décochée dans l'assistant ou la page de l'application : n'est plus proposée
+    public List<string> Approved { get; set; } = new();
+    public List<string> Hidden { get; set; } = new();
 }
 
 /// <summary>Un dossier d'un Drive (Google Drive, OneDrive / SharePoint, Nextcloud, SFTP, Dropbox), copié dans la médiathèque (fichiers masqués, Info["drive"] = Id) et affiché par l'app « Dossier Drive ».</summary>

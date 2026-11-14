@@ -96,7 +96,7 @@ public class AppCatalog
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private static readonly string[] AllPlacements = { "full", "top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom" };
-    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "city", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive", "facebookpage", "haentity", "haplanpick", "haviewpick" };
+    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "city", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive", "facebookpage", "linkedinpage", "linkedinposts", "haentity", "haplanpick", "haviewpick" };
     private readonly List<AppManifest> _apps = new();
 
     public IReadOnlyList<AppManifest> All => _apps;
@@ -222,6 +222,9 @@ public class AppCatalog
                     break;
                 case "facebookpage":
                     if (FacebookProvider.PageRef(v) == null) errors.Add($"« {f.Label} » : Page Facebook non reconnue (identifiant, nom ou adresse facebook.com/…).");
+                    break;
+                case "linkedinpage":
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(v, @"^urn:li:organization:\d{1,20}$")) errors.Add($"« {f.Label} » : choisissez une page LinkedIn.");
                     break;
                 case "youtube":
                     if (YouTube.Canonical(v) == null) errors.Add($"« {f.Label} » : lien YouTube non reconnu (vidéo ou playlist).");

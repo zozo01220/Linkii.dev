@@ -539,7 +539,7 @@ public static class Seed
     /// Apps retirées du catalogue (manifeste supprimé) : leurs contenus, leurs activations et leurs éléments déjà publiés sont retirés,
     /// pour qu'aucun écran n'affiche un emplacement vide. Une sauvegarde de data.json est faite avant (data.json.pre-apps-retirees.bak).
     /// </summary>
-    public static readonly string[] RetiredApps = { "linkedin", "menu-api", "menu-csv", "weather-forecast", "room" };   // retirées le 7 octobre 2026 (code archivé dans _archive/)
+    public static readonly string[] RetiredApps = { "menu-api", "menu-csv", "weather-forecast", "room" };   // retirées le 7 octobre 2026 (code archivé dans _archive/) ; LinkedIn est revenue le 14 novembre (§255)
 
     public static void PurgeRetiredApps(JsonStore store, AppCatalog catalog, string dataPath, ILogger log)
     {

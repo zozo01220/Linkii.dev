@@ -65,9 +65,9 @@ public class AppsTests(Platform p)
     public void Catalog_contains_the_phase_1_apps_with_valid_manifests()
     {
         var catalog = p.Services.GetRequiredService<AppCatalog>();
-        Assert.Equal(new[] { "agenda", "canva", "clock", "clock-slide", "composition", "countdown", "drive", "emergency", "facebook", "google-docs", "google-slides", "ha-building", "ha-climate", "ha-covers", "ha-lights", "ha-locks", "ha-plan", "ha-scenes", "ha-sensors", "ha-switches", "image", "ms-powerpoint", "pdf", "qrcode", "quote", "room-booking", "rss", "rss-widget", "slideshow-images", "slideshow-videos", "text", "video", "weather", "weather-slide", "webpage", "youtube" }, catalog.All.Select(a => a.Id).OrderBy(x => x).ToArray());
+        Assert.Equal(new[] { "agenda", "canva", "clock", "clock-slide", "composition", "countdown", "drive", "emergency", "facebook", "google-docs", "google-slides", "ha-building", "ha-climate", "ha-covers", "ha-lights", "ha-locks", "ha-plan", "ha-scenes", "ha-sensors", "ha-switches", "image", "linkedin", "ms-powerpoint", "pdf", "qrcode", "quote", "room-booking", "rss", "rss-widget", "slideshow-images", "slideshow-videos", "text", "video", "weather", "weather-slide", "webpage", "youtube" }, catalog.All.Select(a => a.Id).OrderBy(x => x).ToArray());
         Assert.All(catalog.All, a => Assert.Empty(AppCatalog.Check(a)));
-        Assert.Equal(new[] { "facebook", "rss", "text", "webpage" }, catalog.All.Where(a => a.IsNoCode).Select(a => a.Id).OrderBy(x => x).ToArray());
+        Assert.Equal(new[] { "facebook", "linkedin", "rss", "text", "webpage" }, catalog.All.Where(a => a.IsNoCode).Select(a => a.Id).OrderBy(x => x).ToArray());
     }
 
     [Fact]

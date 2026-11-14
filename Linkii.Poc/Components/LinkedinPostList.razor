@@ -1,0 +1,104 @@
+@inject TenantStore Store
+@inject LinkedinProvider Provider
+@inject Toaster Toast
+
+@* Application LinkedIn (§255), fenêtre du contenu : publications récentes de la page avec leur état pour l'organisation.
+   « Valider » / « Masquer » / « Afficher » s'enregistrent tout de suite (réglage de l'organisation, pas du contenu) :
+   les écrans les prennent en compte à leur prochaine lecture, sans republier la liste. *@
+@if (string.IsNullOrEmpty(Urn))
+{
+    <div class="dw-note">Choisissez d'abord la page LinkedIn : ses publications s'afficheront ici.</div>
+}
+else if (loading)
+{
+    <div class="li-plist-empty"><span class="spinner"></span> Lecture des publications…</div>
+}
+else if (error != null)
+{
+    <div class="dw-note">@error</div>
+}
+else if (rows.Count == 0)
+{
+    <div class="li-plist-empty">Aucune publication lisible pour le moment.</div>
+}
+else
+{
+    <div class="li-plist" role="list">
+        @foreach (var (p, state) in rows)
+        {
+            var id = p.Post.Id;
+            <div class="li-pl @(state == LinkedinAuth.Waiting ? "wait" : "")" role="listitem">
+                <span class="li-pl-th">
+                    @if (p.Image is { } img) { <img src="@img" alt="" loading="lazy" /> }
+                    @if (p.Post.VideoUrn != null) { <i aria-label="Vidéo">▶</i> }
+                </span>
+                <span class="li-pl-tx">
+                    <b title="@p.Post.Text">@(p.Post.Text.Length > 0 ? p.Post.Text : "(publication sans texte)")</b>
+                    <small>@Ago(p.Post.Created)@(p.Post.VideoUrn != null ? " · vidéo" : "")@if (state == LinkedinAuth.Waiting) { <span class="li-pl-st wait"> · À valider</span> } else if (state == LinkedinAuth.Masked) { <span class="li-pl-st"> · Masquée</span> } else if (TooOld(p)) { <span class="li-pl-st"> · Trop ancienne</span> }</small>
+                </span>
+                @if (state == LinkedinAuth.Waiting)
+                {
+                    <button type="button" class="btn sm" @onclick="() => Set(id, LinkedinAuth.Shown)">Valider</button>
+                    <button type="button" class="btn ghost sm icon" title="Masquer cette publication" aria-label="Masquer" @onclick="() => Set(id, LinkedinAuth.Masked)"><Ico Name="eye-off" Size="15" /></button>
+                }
+                else if (state == LinkedinAuth.Masked)
+                {
+                    <button type="button" class="btn ghost sm" @onclick="() => Set(id, LinkedinAuth.Shown)">Afficher</button>
+                }
+                else
+                {
+                    <span class="li-pl-ok">✓ Affichée</span>
+                    <button type="button" class="btn ghost sm icon" title="Masquer cette publication" aria-label="Masquer" @onclick="() => Set(id, LinkedinAuth.Masked)"><Ico Name="eye-off" Size="15" /></button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? Urn { get; set; }
+
+    private List<(LinkedinFeedPost Post, string State)> rows = new();
+    private bool loading;
+    private string? error, shownUrn;
+    private int maxAge;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Urn == shownUrn) return;
+        shownUrn = Urn;
+        rows.Clear(); error = null;
+        if (string.IsNullOrEmpty(Urn)) return;
+        loading = true;
+        try
+        {
+            var t = Store.Read(d => d.Tenant);
+            maxAge = t.LinkedinMaxAgeDays;
+            rows = await Provider.WithStates(t, Urn);
+        }
+        catch (InvalidOperationException ex) { error = ex.Message; }
+        loading = false;
+    }
+
+    private void Set(string postId, string state)
+    {
+        var urn = Urn!;
+        var t = Store.Write(d => { LinkedinAuth.SetState(d.Tenant, urn, postId, state); return d.Tenant; });
+        var page = t.LinkedinPages.FirstOrDefault(p => p.Urn == urn);
+        rows = rows.Select(r => (r.Post, LinkedinAuth.StateOf(t, page, r.Post.Post.Id))).ToList();
+        Toast.Ok(state == LinkedinAuth.Shown ? "Publication affichée : les écrans la montrent à leur prochaine lecture." : "Publication masquée sur vos écrans.");
+    }
+
+    private bool TooOld(LinkedinFeedPost p) => maxAge > 0 && p.Post.Created is { } d && DateTime.UtcNow - d > TimeSpan.FromDays(maxAge);
+
+    private static string Ago(DateTime? utc)
+    {
+        if (utc is not { } d) return "";
+        var span = DateTime.UtcNow - d;
+        return span.TotalHours < 1 ? "il y a moins d'une heure"
+             : span.TotalHours < 24 ? $"il y a {(int)span.TotalHours} h"
+             : span.TotalDays < 2 ? "hier"
+             : span.TotalDays < 7 ? $"il y a {(int)span.TotalDays} jours"
+             : d.ToLocalTime().ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("fr-CH"));
+    }
+}

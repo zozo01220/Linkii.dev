@@ -93,6 +93,9 @@ builder.Services.AddSingleton<IAppProvider, WeatherSlideProvider>();
 builder.Services.AddSingleton<IAppProvider, CalendarProvider>();
 builder.Services.AddSingleton<IAppProvider, RssProvider>();
 builder.Services.AddSingleton<IAppProvider, FacebookProvider>();
+builder.Services.AddSingleton<LinkedinMedia>();   // copies des photos et vidéos des publications LinkedIn (§255)
+builder.Services.AddSingleton<LinkedinProvider>();
+builder.Services.AddSingleton<IAppProvider>(sp => sp.GetRequiredService<LinkedinProvider>());
 builder.Services.AddSingleton<IAppProvider, WebPageProvider>();
 builder.Services.AddSingleton<IAppProvider, YouTubeProvider>();
 builder.Services.AddSingleton<IHaTransport, HaTransport>();   // Home Assistant : appels directs (https public) ou par le relais Linkii (réseau local)
@@ -112,6 +115,8 @@ builder.Services.AddHostedService<SubscriptionWorker>();   // comptes bloqués f
 builder.Services.AddHostedService<SignupWorker>();   // inscriptions non validées supprimées, rappel et fin des essais gratuits
 builder.Services.AddSingleton<DropboxAuth>();   // « Se connecter avec Dropbox » (lecture seule)
 builder.Services.AddSingleton<FacebookAuth>();   // « Se connecter avec Facebook » (Pages administrées, lecture seule)
+builder.Services.AddSingleton<LinkedinAuth>();   // « Continuer avec LinkedIn » (pages gérées, lecture seule, §255)
+builder.Services.AddHostedService<LinkedinWorker>();   // rappels d'échéance de la connexion LinkedIn, ménage des médias copiés
 builder.Services.AddSingleton<RemoteDrives>();   // sessions Nextcloud (WebDAV), SFTP et Dropbox
 builder.Services.AddSingleton<DriveService>();
 builder.Services.AddSingleton<CloudFileService>();
@@ -249,7 +254,7 @@ app.UseStaticFiles(new StaticFileOptions
     OnPrepareResponse = ctx =>
     {
         var path = ctx.Context.Request.Path;
-        if (path.StartsWithSegments("/player") || path.StartsWithSegments("/app.css")
+        if (path.StartsWithSegments("/player") || path.StartsWithSegments("/app.css") || path.StartsWithSegments("/brand-logos.svg")   // logos : un nouveau symbole (LinkedIn, §255) doit apparaître sans attendre l'expiration du cache
             || path.StartsWithSegments("/sw.js") || path.StartsWithSegments("/pwa.js") || path.StartsWithSegments("/offline.html"))
             ctx.Context.Response.Headers.CacheControl = "no-cache";
     }
@@ -355,6 +360,7 @@ app.Use(async (ctx, next) =>
                || p.StartsWithSegments("/google/callback")  // retour de Google (Drive) : idem
                || p.StartsWithSegments("/dropbox/callback")  // retour de Dropbox : idem
                || p.StartsWithSegments("/facebook/callback")  // retour de Facebook : idem
+               || p.StartsWithSegments("/linkedin/pages/callback") || p.StartsWithSegments("/li-media")  // retour de LinkedIn (application LinkedIn) ; copies de ses médias : contrôle d'accès propre
                || p.StartsWithSegments("/microsoft/callback")  // retour de Microsoft : idem
                || p.StartsWithSegments("/linkedin/callback") || p.StartsWithSegments("/github/callback")  // retours de LinkedIn et GitHub (connexion seulement)
                || p.StartsWithSegments("/docs")   // documentation publique de l'API (aux couleurs du revendeur)
@@ -451,6 +457,37 @@ app.MapGet("/facebook/connect", (HttpContext ctx, FacebookAuth facebook) =>
 });
 app.MapGet("/facebook/callback", async (HttpContext ctx, HttpRequest req, FacebookAuth facebook) =>
     await AccountLinked(ctx, "Facebook", facebook.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+
+// Compte LinkedIn (application LinkedIn, §255) : « Continuer avec LinkedIn » depuis son assistant (?wiz=linkedin), la page de l'application (?back=app)
+// ou Réglages › Connexions ; application LinkedIn de la plateforme (Community Management API), lecture seule des pages gérées. Un seul compte par organisation.
+// Adresse de retour distincte de /linkedin/callback (connexion au back-office avec LinkedIn, qui est une autre application LinkedIn).
+app.MapGet("/linkedin/pages/connect", (HttpContext ctx, LinkedinAuth linkedin) =>
+{
+    var cid = ctx.User.GetGuid(Claims.Client);
+    if (cid == null) return Results.Redirect("/");
+    if (!linkedin.IsConfigured) return Results.Redirect("/applications?linkedin=unconfigured");
+    var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+    var back = ctx.Request.Query["back"] == "app" ? "/apps/linkedin" : AccountPurposes.ReturnPage(ctx.Request);
+    return Results.Redirect(linkedin.StartAuthorization(cid.Value, here + back, here));
+});
+app.MapGet("/linkedin/pages/callback", async (HttpContext ctx, HttpRequest req, LinkedinAuth linkedin) =>
+    await AccountLinked(ctx, "LinkedIn", linkedin.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+
+// Copies des photos et vidéos des publications LinkedIn : pour les personnes connectées de l'organisation, ses écrans (jeton) et ses aperçus (?pv=).
+app.MapGet("/li-media/{file}", (HttpContext ctx, string file, JsonStore store, LinkedinMedia media, PreviewGrants grants) =>
+{
+    if (file != Path.GetFileName(file) || LinkedinMedia.OwnerOf(file) is not { } owner || media.PathOf(file) is not { } path || !File.Exists(path)) return Results.NotFound();
+    var token = ctx.Request.Headers["X-Token"].ToString();
+    if (string.IsNullOrEmpty(token)) token = ctx.Request.Query["t"].ToString();
+    var userClient = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.GetGuid(Claims.Client) : null;
+    var previewClient = ctx.Request.Query["pv"].ToString() is { Length: > 0 } pv ? grants.Find(pv)?.ClientId : null;
+    var ok = userClient == owner || previewClient == owner
+             || !string.IsNullOrEmpty(token) && store.Read(db => db.Screens.Any(s => s.Token == token && s.ClientId == owner && Tenancy.IsActive(db, s)));
+    if (!ok) return Results.NotFound();
+    var type = Path.GetExtension(file).ToLowerInvariant() switch { ".png" => "image/png", ".webp" => "image/webp", ".gif" => "image/gif", ".mp4" => "video/mp4", _ => "image/jpeg" };
+    ctx.Response.Headers.CacheControl = "private, max-age=86400";
+    return Results.File(path, type, enableRangeProcessing: true);
+});
 
 // Compte Microsoft : « Se connecter avec Microsoft » depuis Applications › Microsoft 365 (?for=calendar), OneDrive et SharePoint (?for=drive)
 // ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),

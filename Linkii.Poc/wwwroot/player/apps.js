@@ -527,6 +527,149 @@
     }, Math.max(5, parseInt(s.interval, 10) || 12) * 1000);
   });
 
+  /* ---------- LinkedIn (§255) : publications d'une page entreprise, une à la fois ou en mur ----------
+     Données : /api/data (texte, date, adresses /li-media/… des copies du serveur, réactions, QR code « côté|tracé »). Une vidéo est lue sans le son
+     jusqu'à sa fin (5 minutes au plus) avant la publication suivante ; une photo ou une vidéo illisible laisse la carte en texte seul. */
+  A.register('linkedin', function (h) {
+    var s = h.settings, el = h.el, wall = s.layout === 'wall';
+    var every = Math.max(5, parseInt(s.interval, 10) || 12) * 1000, qrOn = s.qr !== 'false';
+    var posts = [], name = 'LinkedIn', ini = 'in', idx = 0, sig = null, timer = null, srcs = [], seen = 0;
+    // dans une boucle (durée « content »), le contenu se termine quand chaque publication est passée une fois ; seul, il tourne sans fin
+    function done() { if (h.opts && h.opts.onEnded) { h.opts.onEnded(); return true; } return false; }
+    el.className += wall ? ' li-wall' : ' li-one';
+    function clear() { if (timer) { clearTimeout(timer); timer = null; } for (var i = 0; i < srcs.length; i++) srcs[i].revoke(); srcs = []; }
+    h.onStop(clear);
+
+    function div(cls, txt) { var d = document.createElement('div'); d.className = cls; if (txt != null) d.textContent = txt; return d; }
+    function ago(iso) {
+      var t = Date.parse(iso || ''); if (!t) return '';
+      var hrs = (Date.now() - t) / 36e5;
+      if (hrs < 1) return 'il y a moins d\'une heure';
+      if (hrs < 24) return 'il y a ' + Math.floor(hrs) + ' h';
+      if (hrs < 48) return 'hier';
+      if (hrs < 24 * 7) return 'il y a ' + Math.floor(hrs / 24) + ' jours';
+      return h.shortDate(t);
+    }
+    function text(p) {   // le texte, avec les mots-clés (#…) en bleu
+      var x = div('li-x'), parts = String(p.text || '').split(/(#[\wÀ-ɏ-]+)/);
+      for (var i = 0; i < parts.length; i++) {
+        if (!parts[i]) continue;
+        if (parts[i].charAt(0) === '#') { var b = document.createElement('span'); b.className = 'tag'; b.textContent = parts[i]; x.appendChild(b); }
+        else x.appendChild(document.createTextNode(parts[i]));
+      }
+      return x;
+    }
+    function reactions(p) {
+      var r = div('li-rx');
+      if (p.likes == null) return r;
+      r.innerHTML = '<i style="background:#0A66C2">👍</i><i style="background:#DF704D">❤</i><i style="background:#6DAE4F">👏</i>';
+      r.appendChild(document.createTextNode(p.likes + (p.comments != null ? ' · ' + p.comments + ' commentaire' + (p.comments > 1 ? 's' : '') : '')));
+      return r;
+    }
+    function qr(p) {
+      var parts = String(p.qr || '').split('|'), n = parseInt(parts[0], 10), path = parts[1] || '';
+      if (!qrOn || !(n > 0) || !/^[0-9MhvzH\- ]+$/.test(path)) return null;
+      var q = div('li-qr');
+      q.innerHTML = '<span>Lire sur<br>LinkedIn</span><svg viewBox="0 0 ' + n + ' ' + n + '" shape-rendering="crispEdges" aria-hidden="true"><path d="' + path + '" fill="#0B1F3A"/></svg>';
+      return q;
+    }
+    // photo ou vidéo : copie locale (hors ligne) si le player l'a, sinon en ligne avec le jeton de l'écran
+    function media(box, p, play, onEnd) {
+      var card = box.parentNode;
+      function fail() { if (box.parentNode) box.parentNode.removeChild(box); card.className += ' txt'; }
+      if (play && p.video) {
+        var v = document.createElement('video');
+        v.muted = true; v.setAttribute('muted', ''); v.playsInline = true; v.setAttribute('playsinline', ''); v.autoplay = true;
+        if (p.image) h.media(p.image).then(function (m) { srcs.push(m); v.poster = m.src; });
+        v.onended = onEnd;
+        v.onerror = function () { if (p.image) { v.remove(); media(box, { image: p.image }, false); onEnd(true); } else { fail(); onEnd(true); } };
+        h.media(p.video).then(function (m) { srcs.push(m); v.src = m.src; var pr = v.play(); if (pr && pr.catch) pr.catch(function () {}); });
+        box.appendChild(v);
+        var mute = div('li-mute', '🔇 Vidéo sans le son'); box.appendChild(mute);
+        return true;
+      }
+      if (!p.image) { fail(); return false; }
+      var img = document.createElement('img'); img.alt = '';
+      img.onerror = fail;
+      h.media(p.image).then(function (m) { srcs.push(m); img.src = m.src; });
+      box.appendChild(img);
+      return false;
+    }
+    function card(p, first, onEnd) {
+      var c = div('li-card'), box = div('im'), tx = div('tx'), playing = false;
+      c.appendChild(box);
+      if (!wall && p.created) tx.appendChild(div('li-m', ago(p.created)));
+      tx.appendChild(text(p));
+      var ft = div('li-ft');
+      if (wall) ft.appendChild(div('li-m', ago(p.created)));
+      ft.appendChild(reactions(p));
+      var q = !wall ? qr(p) : null; if (q) ft.appendChild(q);
+      tx.appendChild(ft); c.appendChild(tx);
+      if (p.image || p.video) playing = media(box, p, !wall && !!onEnd, onEnd || function () {}); else c.className += ' txt', c.removeChild(box);
+      c._video = playing;
+      return c;
+    }
+
+    function head() {
+      var hd = div('li-h'), pg = div('pg', ini), nm = div('nm', name), sm = document.createElement('small'), lg = div('lg', 'in');
+      sm.textContent = ' · sur LinkedIn'; nm.appendChild(sm);
+      hd.appendChild(pg); hd.appendChild(nm); hd.appendChild(lg);
+      return hd;
+    }
+
+    function schedule(ms, bar) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(next, ms);
+      if (bar) {   // barre de temps restant
+        bar.style.transition = 'none'; bar.style.width = '0';
+        void bar.offsetWidth;
+        bar.style.transition = 'width ' + ms + 'ms linear'; bar.style.width = '100%';
+      }
+    }
+    function next() {
+      if (wall || seen >= posts.length) { if (done()) return; seen = 0; }
+      if (posts.length > 1) { idx = (idx + 1) % posts.length; sig = null; }
+      draw();
+    }
+
+    function draw() {
+      var list = wall ? posts.slice(0, 3) : posts.slice(idx, idx + 1);
+      var key = (wall ? 'w' : idx) + '|' + name + '|' + list.map(function (p) { return p.id + (p.image || '') + (p.video || '') + p.likes + p.comments; }).join(',');
+      if (key === sig && !(!wall && posts.length > 1)) return;   // rien de changé (mur ou publication seule) : pas de redessin, les photos ne clignotent pas
+      sig = key;
+      clear();
+      el.textContent = '';
+      el.className = el.className.replace(/ li-port/g, '') + (el.clientHeight > el.clientWidth * 1.1 ? ' li-port' : '');
+      el.appendChild(head());
+      if (!list.length) { el.appendChild(div('li-empty', 'Aucune publication à afficher')); if (h.opts && h.opts.onEnded) schedule(3000); return; }
+      seen++;
+      var grid = div('li-grid n' + list.length), bar = null, hasVideo = false;
+      var ended = function () { if (timer) clearTimeout(timer); timer = setTimeout(next, 600); };
+      for (var i = 0; i < list.length; i++) {
+        var c = card(list[i], i === 0, !wall ? ended : null);
+        if (c._video) hasVideo = true;
+        grid.appendChild(c);
+      }
+      el.appendChild(grid);
+      if (!wall && posts.length > 1) {
+        var dots = div('li-dots');
+        for (var d = 0; d < posts.length; d++) dots.appendChild(document.createElement('i')).className = d === idx ? 'on' : '';
+        el.appendChild(dots);
+        bar = div('li-bar'); el.appendChild(bar);
+      }
+      if (wall) { if (h.opts && h.opts.onEnded) schedule(Math.max(every, 20000)); }
+      else if (posts.length > 1 || hasVideo || (h.opts && h.opts.onEnded)) schedule(hasVideo ? 5 * 60 * 1000 : every, hasVideo ? null : bar);   // une vidéo fixe elle-même la suite (fin de lecture)
+    }
+
+    h.data(function (d) {
+      posts = (d && d.posts) || [];
+      name = (d && d.page) || 'LinkedIn';
+      ini = (d && d.initials) || 'in';
+      if (idx >= posts.length) idx = 0;
+      if (wall || !timer) draw();   // une publication à la fois : les nouvelles données attendent la publication suivante
+    }, 15 * 60 * 1000);
+  });
+
   /* ---------- YouTube : API IFrame (lecture automatique, enchaînement à la fin, erreurs visibles) ---------- */
   A.register('youtube', function (h) {
     var s = h.settings, u = s.url || '';

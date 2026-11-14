@@ -6,10 +6,13 @@ namespace Linkii.Poc;
 /// </summary>
 public static class BrandLogos
 {
+    /// <summary>Adresse du sprite des logos, avec sa version : à augmenter quand un symbole est ajouté (LinkedIn, §255), sinon les navigateurs gardent l'ancien fichier en cache. Même valeur dans compo-editor.js.</summary>
+    public const string Sprite = "/brand-logos.svg?v=255";
+
     // Identifiant d'app, de source ou de fournisseur -> symbole du sprite.
     private static readonly Dictionary<string, string> Map = new()
     {
-        ["microsoft"] = "microsoft", ["google"] = "google", ["facebook"] = "facebook", ["youtube"] = "youtube", ["canva"] = "canva",
+        ["microsoft"] = "microsoft", ["google"] = "google", ["facebook"] = "facebook", ["linkedin"] = "linkedin", ["youtube"] = "youtube", ["canva"] = "canva",
         ["homeassistant"] = "ha", ["ha-sensors"] = "ha", ["ha-switches"] = "ha", ["ha-lights"] = "ha", ["ha-climate"] = "ha", ["ha-covers"] = "ha", ["ha-scenes"] = "ha", ["ha-locks"] = "ha", ["ha-plan"] = "ha", ["ha-home"] = "ha",
         ["google-slides"] = "gslides", ["google-docs"] = "gdocs", ["google-sheets"] = "gsheets", ["ms-powerpoint"] = "ppt", ["rss"] = "rss", ["rss-widget"] = "rss",
         ["weather"] = "weather", ["weather-slide"] = "weather", ["pdf"] = "pdf",

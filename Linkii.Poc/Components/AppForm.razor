@@ -136,6 +136,25 @@
                             <small>@(fbLost ? "Le compte Facebook est à reconnecter" : "Aucun compte Facebook connecté") : <a href="/settings?tab=connexions">connectez-le dans Réglages › Connexions</a>, ou saisissez la Page ici et collez son jeton dans les options avancées.</small>
                         }
                         break;
+                    case "linkedinpage":
+                        @* LinkedIn (§255) : une page par contenu, parmi celles cochées dans Applications › LinkedIn *@
+                        @if (liPages.Count > 0)
+                        {
+                            <select @bind="Values[k]" @bind:after="Changed">
+                                <option value="">— Choisir une page —</option>
+                                @foreach (var pg in liPages) { <option value="@pg.Urn">@pg.Name</option> }
+                                @if (Values[k].Length > 0 && liPages.All(x => x.Urn != Values[k])) { <option value="@Values[k]">@(liAll.FirstOrDefault(x => x.Urn == Values[k])?.Name ?? "Page retirée")</option> }
+                            </select>
+                            <small>Une page par contenu. Les pages proposées se choisissent dans <a href="/apps/linkedin">Applications › LinkedIn</a>.</small>
+                        }
+                        else
+                        {
+                            <div class="dw-note">@(liLost ? "La connexion LinkedIn a expiré" : "Aucune page LinkedIn disponible") : <a href="/apps/linkedin">ouvrez Applications › LinkedIn</a> pour @(liLost ? "reconnecter le compte" : "connecter le compte qui gère la page").</div>
+                        }
+                        break;
+                    case "linkedinposts":
+                        <LinkedinPostList Urn="@Values.GetValueOrDefault("page")" />
+                        break;
                     case "haviewpick":
                         <HaViewPick Field="f" Values="Values" OnChange="Changed" />
                         break;
@@ -310,6 +329,8 @@ case "mailbox":
     private List<DriveFolder> folders = new();
     private List<FacebookPageAccess> fbPages = new();
     private bool fbLost;
+    private List<LinkedinPageAccess> liPages = new(), liAll = new();
+    private bool liLost;
 
     protected override async Task OnInitializedAsync()
     {
@@ -319,6 +340,15 @@ case "mailbox":
             var t = Store.Read(d => d.Tenant);
             fbPages = FacebookAuth.Pages(t);
             fbLost = t.FacebookLostUtc != null;
+        }
+        if (Manifest.Settings.Any(f => f.Type == "linkedinpage"))
+        {
+            // pages lisibles et cochées du compte LinkedIn ; la page déjà choisie reste affichée (nom gardé) si elle a été décochée
+            var t = Store.Read(d => d.Tenant);
+            liPages = LinkedinAuth.Pages(t);
+            liAll = t.LinkedinPages.ToList();
+            liLost = t.LinkedinConnectedUtc != null && !LinkedinAuth.Has(t);
+            if (liPages.Count == 1 && Values.TryGetValue("page", out var cur) && cur.Length == 0) Values["page"] = liPages[0].Urn;   // une seule page : choisie d'office
         }
         if (Manifest.Settings.FirstOrDefault(f => f.Type == "drive") is { } df)
         {

@@ -68,6 +68,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
             case "media": if (Guid.TryParse(id, out var mid) && d.AllMedia.FirstOrDefault(m => m.Id == mid) is { } m) m.Off = !on; break;
             case "calendar": if (Guid.TryParse(id, out var cid) && d.Tenant.SharedCalendars.FirstOrDefault(c => c.Id == cid) is { } c) c.Off = !on; break;
             case "page": if (d.Tenant.FacebookPages.FirstOrDefault(p => p.Id == id) is { } p) p.Off = !on; break;
+            case "lipage": if (d.Tenant.LinkedinPages.FirstOrDefault(p => p.Urn == id) is { } lp) lp.Off = !on; break;
             case "entity": if (entities != null && entities.TryGetValue(id, out var e)) e.Off = !on; break;
         }
     }

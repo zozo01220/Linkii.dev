@@ -37,7 +37,8 @@ public record ConnectedAccount(string Id, string Kind, string User, string Detai
 public static class ConnectedAccounts
 {
     public const string Microsoft = "microsoft", Google = "google", Canva = "canva", CalDav = "caldav", Exchange = "ews",
-                        Nextcloud = "nextcloud", Sftp = "sftp", Dropbox = "dropbox", Facebook = "facebook", HomeAssistant = "homeassistant";
+                        Nextcloud = "nextcloud", Sftp = "sftp", Dropbox = "dropbox", Facebook = "facebook", HomeAssistant = "homeassistant",
+                        Linkedin = "linkedin";
 
     /// <summary>Onglet de la page Applications (?tab=comptes).</summary>
     public const string Tab = "comptes";
@@ -52,6 +53,7 @@ public static class ConnectedAccounts
         new(Google, "Google", "Google Calendar, Google Drive, Google Slides et Google Docs", ["cal-google", "drv-gdrive", "google-slides", "google-docs"]),
         new(Canva, "Canva", "Vos designs Canva", ["canva"]),
         new(Facebook, "Facebook", "Les publications des Pages que vous administrez", ["facebook"]),
+        new(Linkedin, "LinkedIn", "Les publications des pages LinkedIn que vous gérez", ["linkedin"]),
         new(CalDav, "Serveur CalDAV", "Nextcloud, iCloud, Zimbra, SOGo, Synology…", ["cal-caldav"]),
         new(Exchange, "Exchange sur site", "Serveur Exchange (EWS)", ["cal-ews"]),
         new(Nextcloud, "Nextcloud", "Dossiers d'un serveur Nextcloud ou ownCloud", ["drv-nextcloud"]),
@@ -100,6 +102,17 @@ public static class ConnectedAccounts
                 n == 0 ? "Aucune Page administrée" : $"{n} Page{(n > 1 ? "s" : "")} · {string.Join(", ", t.FacebookPages.Take(3).Select(p => p.Name))}{(n > 3 ? "…" : "")}",
                 t.FacebookConnectedUtc, t.FacebookLostUtc != null, "", [new("Pages et publications (lecture)", true, null)]));
         }
+        if (t.LinkedinConnectedUtc != null)
+        {
+            var readable = t.LinkedinPages.Where(p => p.CanRead).ToList();
+            var n = readable.Count;
+            var days = LinkedinAuth.DaysLeft(t, DateTime.UtcNow);
+            var lost = t.LinkedinLostUtc != null || days is <= 0;
+            list.Add(new(Linkedin, "LinkedIn", t.LinkedinUser.Length > 0 ? t.LinkedinUser : "Compte LinkedIn",
+                (n == 0 ? "Aucune page lisible" : $"{n} page{(n > 1 ? "s" : "")} · {string.Join(", ", readable.Take(3).Select(p => p.Name))}{(n > 3 ? "…" : "")}")
+                + (!lost && t.LinkedinExpiresUtc is { } exp ? $" · valable jusqu'au {exp.ToLocalTime():dd.MM.yyyy}" : ""),
+                t.LinkedinConnectedUtc, lost, "", [new("Pages et publications (lecture)", true, null)]));
+        }
         if (SharedCalendarSources.Account(t, CalDav) is { } dav && (dav.Url.Length > 0 || dav.User.Length > 0))
             list.Add(new(CalDav, "Serveur CalDAV", dav.User.Length > 0 ? dav.User : "Sans identifiant", dav.Url, null, false, dav.LastError,
                 [new("Agendas (lecture)", true, null)]));
@@ -138,6 +151,7 @@ public static class ConnectedAccounts
         Canva => "/canva/connect?tab=" + Tab,
         Dropbox => "/dropbox/connect?tab=" + Tab,
         Facebook => "/facebook/connect?tab=" + Tab,
+        Linkedin => "/linkedin/pages/connect?tab=" + Tab,
         _ => $"/{kind}/connect?for={purpose}&tab={Tab}"
     };
 }
